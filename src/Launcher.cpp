@@ -253,7 +253,8 @@ bool RunLauncher()
 
     const bool isDx11 = CurrentIsDx11();
     wchar_t renderer[16];
-    GetPrivateProfileStringW(L"Launcher", L"Renderer", isDx11 ? L"DX11" : L"DX9", renderer, 16, ini);
+    // DX11 is the default until the player picks something else
+    GetPrivateProfileStringW(L"Launcher", L"Renderer", L"DX11", renderer, 16, ini);
     const bool wantDx11 = _wcsicmp(renderer, L"DX9") != 0;
 
     const bool showAtLaunch = GetPrivateProfileIntW(L"Launcher", L"ShowAtLaunch", 1, ini) != 0;

@@ -421,7 +421,7 @@ static const GameBuild kBuilds[] = {
 // table's display matches its "EnterInitials" pattern, but only some table types have the
 // code that closes it again ("if menu 0x23 and entry finished: go back a menu", e.g. VA
 // 0x4C33BA). For the rest it is never closed. We do the same thing generically: if the
-// EnterName menu has been open for 1.5 s on a ROM-initials table while the game's
+// EnterName menu has been open for 0.5 s on a ROM-initials table while the game's
 // EnterInitials flag is clear, call the game's own "back to previous menu" (VA 0x68F410).
 namespace Dx11 {
 const DWORD kCurMenu = 0x012982C0;       // VA 0x16982C0: current GUI menu id
@@ -446,7 +446,7 @@ static void FixStuckInitialsOverlay()
         stuckFrames = 0;
         return;
     }
-    if (++stuckFrames < 90) return; // 1.5 s at 60 fps
+    if (++stuckFrames < 30) return; // 0.5 s at 60 fps
     stuckFrames = 0;
     typedef void*(__cdecl * GetMenus_t)();
     typedef void(__thiscall * MenuBack_t)(void*);

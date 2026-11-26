@@ -24,7 +24,18 @@ static FARPROC Real(LPCSTR name)
         return fn ? fn args : fail;                                        \
     }
 
-FWD(DWORD, ERROR_DEVICE_NOT_CONNECTED, XInputGetState, "XInputGetState", (DWORD a, void* b), (a, b))
+extern volatile bool g_padPressed;
+
+extern "C" DWORD WINAPI Proxy_XInputGetState(DWORD user, void* state)
+{
+    typedef DWORD(WINAPI * fn_t)(DWORD, void*);
+    static fn_t fn = (fn_t)Real("XInputGetState");
+    if (!fn) return ERROR_DEVICE_NOT_CONNECTED;
+    DWORD r = fn(user, state);
+    // XINPUT_STATE: DWORD dwPacketNumber; WORD wButtons; BYTE triggers[2]; ...
+    if (r == ERROR_SUCCESS && state && *(WORD*)((BYTE*)state + 4)) g_padPressed = true;
+    return r;
+}
 FWD(DWORD, ERROR_DEVICE_NOT_CONNECTED, XInputSetState, "XInputSetState", (DWORD a, void* b), (a, b))
 FWD(DWORD, ERROR_DEVICE_NOT_CONNECTED, XInputGetCapabilities, "XInputGetCapabilities", (DWORD a, DWORD b, void* c), (a, b, c))
 FWD(DWORD, ERROR_DEVICE_NOT_CONNECTED, XInputGetDSoundAudioDeviceGuids, "XInputGetDSoundAudioDeviceGuids", (DWORD a, GUID* b, GUID* c), (a, b, c))

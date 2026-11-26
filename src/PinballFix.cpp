@@ -61,6 +61,9 @@ static void LoadSettings()
 static LARGE_INTEGER g_freq, g_next;
 static HANDLE g_timer;
 static double g_limitFps;          // timer cap actually applied
+static bool g_loading = true;      // startup loading in progress (see UpdateStartupLoading)
+static LONGLONG g_startQpc;
+volatile bool g_padPressed;        // set by the XInput proxy when a controller button is down
 static HMODULE g_exe;
 static const GameBuild* g_build;
 
@@ -113,7 +116,7 @@ static int __cdecl OnPresent(IDXGISwapChain* swap)
         }
     }
     g_swap = swap;
-    return g_syncInterval;
+    return g_loading ? 0 : g_syncInterval;
 }
 
 // Entered by "call" from the patched site: [esp]=return, [esp+4]=flags, eax=swap chain.
@@ -156,6 +159,9 @@ static void FirstFrameInit()
 {
     LoadSettings();
     QueryPerformanceFrequency(&g_freq);
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    g_startQpc = t.QuadPart;
     g_timer = CreateWaitableTimerExW(nullptr, nullptr, 0x00000002 /*HIGH_RESOLUTION*/, TIMER_ALL_ACCESS);
     if (!g_timer) {
         timeBeginPeriod(1);
@@ -193,10 +199,78 @@ static void FrameStats()
     last = now;
 }
 
+// ---------------------------------------------------------------- startup loading
+// The game streams its startup data in one chunk per frame and only accepts
+// input on "Press Start" once that is done. Capped at 60 fps this took 20-45 s
+// (the title screen seemed frozen and ignored clicks and keys). Until the
+// startup reads go quiet and the player presses something (mouse, keyboard or
+// controller), we lift the cap and present without vsync: the title screen is
+// all that's showing, and the game is ready for that first press within a
+// couple of seconds; the cap returns the moment they press. A 20 s limit ends
+// the phase if nobody presses anything. This applies to startup only;
+// lifting the cap later (table loads, or a disk read mid-game) could
+// fast-forward a table in play.
+static void UpdateStartupLoading()
+{
+    static ULONGLONG lastBytes, windowBytes;
+    static LONGLONG windowStart;
+    static int quietWindows;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    IO_COUNTERS io;
+    if (!GetProcessIoCounters(GetCurrentProcess(), &io)) {
+        g_loading = false;
+        return;
+    }
+    if (!windowStart) {
+        windowStart = now.QuadPart;
+        lastBytes = io.ReadTransferCount;
+        return;
+    }
+    // has the player pressed anything (key, mouse button or controller) since loading went quiet?
+    static LONGLONG lastInputCheck;
+    static bool pressed, quiet;
+    if (quiet && !pressed && now.QuadPart - lastInputCheck > g_freq.QuadPart / 100) {
+        lastInputCheck = now.QuadPart;
+        for (int vk = 1; vk < 0xFF && !pressed; ++vk)
+            if (vk != VK_MENU && vk != VK_LMENU && vk != VK_RMENU && (GetAsyncKeyState(vk) & 0x8000)) pressed = true;
+        if (g_padPressed) pressed = true;
+        if (pressed) {
+            g_loading = false;
+            g_next.QuadPart = 0;
+            Log("Speed fix: startup phase over after %.1f s (player input), 60 fps cap active",
+                (double)(now.QuadPart - g_startQpc) / g_freq.QuadPart);
+            return;
+        }
+    }
+    windowBytes += io.ReadTransferCount - lastBytes;
+    lastBytes = io.ReadTransferCount;
+    if (now.QuadPart - windowStart < g_freq.QuadPart / 4) return; // 250 ms windows
+    const bool busy = windowBytes > 256 * 1024;
+    windowBytes = 0;
+    windowStart = now.QuadPart;
+    quietWindows = busy ? 0 : quietWindows + 1;
+    const double secs = (double)(now.QuadPart - g_startQpc) / g_freq.QuadPart;
+    if (quietWindows >= 2 && !quiet) {
+        quiet = true;
+        g_padPressed = false; // only presses from here on count
+        Log("Speed fix: startup reads finished after %.1f s", secs);
+    }
+    if (secs > 20.0) {
+        g_loading = false;
+        g_next.QuadPart = 0; // resync the cap
+        Log("Speed fix: startup phase over after %.1f s (time limit), 60 fps cap active", secs);
+    }
+}
+
 static void LimitFrame()
 {
     static bool init = false;
     if (!init) { init = true; FirstFrameInit(); }
+    if (g_loading) {
+        UpdateStartupLoading();
+        return;
+    }
     if (g_limitFps <= 0.0) return;
     const LONGLONG period = (LONGLONG)(g_freq.QuadPart / g_limitFps);
     LARGE_INTEGER now;
@@ -255,9 +329,11 @@ void* InstallDetour(BYTE* at, const void* to, const BYTE* expect, size_t len)
 static const GameBuild kBuilds[] = {
     // DX11: frame timer at VA 0x49D7B0 (push ebp; mov ebp,esp; sub esp,14h)
     // Present call site at VA 0x73DB19
-    {L"pinballarcade11.exe", true, 0x5F7DE4C5, 0x0009D7B0, 0, "GameWindowClass", 0, 0x0033DB19},
-    // DX9: set-display-mode at VA 0x5BA5A0; window mode global at VA 0xD072C8
-    {L"pinballarcade.exe", false, 0x5F7DE48A, 0, 0x001BA5A0, "Pinball Arcade", 0x009072C8, 0},
+    {L"pinballarcade11.exe", true, 0x5F7DE4C5, 0x0009D7B0, 0, "GameWindowClass", 0, 0, 0, 0x0033DB19},
+    // DX9: set-display-mode at VA 0x5BA5A0; window mode at VA 0xD072C8; UI tier at VA 0xB46430;
+    //      screen-size snapshot at VA 0xD41A10
+    {L"pinballarcade.exe", false, 0x5F7DE48A, 0, 0x001BA5A0, "Pinball Arcade", 0x009072C8, 0x00746430, 0x00941A10,
+     0},
 };
 
 typedef void(__cdecl* FrameTimer_t)();

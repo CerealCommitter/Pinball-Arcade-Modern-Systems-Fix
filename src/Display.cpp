@@ -263,7 +263,6 @@ struct DisplayMode9 {
     WORD width, height;
     DWORD pixelFormat, depthFormat, stencilBits;
 };
-static DisplayMode9 g_mode9;
 static void* g_origSetDisplayMode;
 
 static DisplayMode9* __cdecl AdjustDisplayMode(DisplayMode9* requested)
@@ -271,12 +270,39 @@ static DisplayMode9* __cdecl AdjustDisplayMode(DisplayMode9* requested)
     EnsureFit();
     if (g_mode == Mode::Off || !requested) return requested;
     ForceWindowedMode();
-    g_mode9 = *requested;
-    g_mode9.width = (WORD)(g_fit.right - g_fit.left);
-    g_mode9.height = (WORD)(g_fit.bottom - g_fit.top);
-    Log("Display: DX9 render resolution %ux%u -> %ux%u", requested->width, requested->height, g_mode9.width,
-        g_mode9.height);
-    return &g_mode9;
+    // Rewrite the game's own preset-table entry (not a copy): other code looks the chosen
+    // mode up again later, e.g. to size the animated menu background, which otherwise
+    // stays a small box sized for the preset.
+    const WORD w = (WORD)(g_fit.right - g_fit.left), h = (WORD)(g_fit.bottom - g_fit.top);
+    if (requested->width != w || requested->height != h) {
+        Log("Display: DX9 render resolution %ux%u -> %ux%u", requested->width, requested->height, w, h);
+        DWORD old;
+        VirtualProtect(requested, sizeof(*requested), PAGE_READWRITE, &old);
+        requested->width = w;
+        requested->height = h;
+        VirtualProtect(requested, sizeof(*requested), old, &old);
+    }
+    // The game snapshots the preset size at window creation (VA 0x555F38) and sizes the
+    // drifting menu background from it (a square of 1.2 x the larger side, VA 0x670C56);
+    // left at 640x480 that background is a 768x768 box in the corner.
+    if (g_build->screenSizeVar) {
+        WORD* snap = (WORD*)((BYTE*)g_exe + g_build->screenSizeVar);
+        snap[0] = w;
+        snap[1] = h;
+    }
+    // The game picked its UI quality tier from the preset's pixel count just before this call
+    // (thresholds from VA 0x5C90A6); redo that for the real size, or menus keep using
+    // small-screen layouts, e.g. the animated background stays a box in the corner.
+    if (g_build->uiTierVar) {
+        int* tier = (int*)((BYTE*)g_exe + g_build->uiTierVar);
+        const long px = (long)w * h;
+        const int want = px >= 0x1AEAA0 ? 2 : px >= 0xE1000 ? 1 : 0;
+        if (*tier != want) {
+            Log("Display: DX9 UI tier %d -> %d", *tier, want);
+            *tier = want;
+        }
+    }
+    return requested;
 }
 
 static __declspec(naked) void SetDisplayMode_Hook()

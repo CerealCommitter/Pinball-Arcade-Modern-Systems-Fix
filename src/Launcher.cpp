@@ -173,17 +173,6 @@ int IndexOf(const int (&table)[N], long long value, int fallback)
 
 int Clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-// Largest 16:9 size on the primary monitor (what the display fix renders at).
-void FittedSize(int& w, int& h)
-{
-    MONITORINFO mi = {sizeof(mi)};
-    GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    const int mw = mi.rcMonitor.right - mi.rcMonitor.left, mh = mi.rcMonitor.bottom - mi.rcMonitor.top;
-    w = mw;
-    h = mh;
-    if ((long long)mw * 9 > (long long)mh * 16) w = mh * 16 / 9;
-    else h = mw * 9 / 16;
-}
 
 // ---------------------------------------------------------------- renderer switch
 // Steam asks which launch option to run unless the player ticks "remember my choice"; with
@@ -271,7 +260,9 @@ bool RunLauncher()
 
     wchar_t mode[32];
     GetPrivateProfileStringW(L"Display", L"Mode", L"Fullscreen", mode, 32, ini);
-    const bool original = _wcsicmp(mode, L"Off") == 0 || _wcsicmp(mode, L"Original") == 0;
+    // "Off"/"Original" (the game's own window) is no longer offered; it maps to Windowed here
+    const bool windowed = _wcsicmp(mode, L"Windowed") == 0 || _wcsicmp(mode, L"Window") == 0 ||
+                          _wcsicmp(mode, L"Off") == 0 || _wcsicmp(mode, L"Original") == 0;
 
     enum { cRenderer, cDisplay, cAA, cTex, cPost, cReflect, cBright, cLang, cInput };
     LauncherSpec spec;
@@ -280,7 +271,7 @@ bool RunLauncher()
     spec.subtitle = L"Modern Systems Fix";
     spec.choices = {
         {L"Renderer", {L"DirectX 11 (recommended)", L"DirectX 9"}, wantDx11 ? 0 : 1},
-        {L"Display", {L"Fullscreen 16:9 with black bars", L"Original game window (fix off)"}, original ? 1 : 0},
+        {L"Display", {L"Fullscreen 16:9 with black bars", L"Windowed 16:9"}, windowed ? 1 : 0},
         {L"Anti-aliasing", {L"Off", L"4x", L"8x"},
          IndexOf(kAaDx11, g.Dx11("MSAAS", kAaDx11[IndexOf(kAaDx9, g.antiAliasing, 0)]), 0)},
         {L"Texture filtering", {L"Bilinear", L"Anisotropic 4x", L"Anisotropic 8x", L"Anisotropic 16x"},
@@ -307,8 +298,8 @@ bool RunLauncher()
 
     // ---- apply
     const auto sel = [&](int i) { return spec.choices[i].selected; };
-    const bool fixOn = sel(cDisplay) == 0;
-    WritePrivateProfileStringW(L"Display", L"Mode", fixOn ? L"Fullscreen" : L"Off", ini);
+    const wchar_t* displayMode = sel(cDisplay) == 0 ? L"Fullscreen" : L"Windowed";
+    WritePrivateProfileStringW(L"Display", L"Mode", displayMode, ini);
     WritePrivateProfileStringW(L"Launcher", L"ShowAtLaunch", spec.checked ? L"1" : L"0", ini);
 
     g.version = 4;
@@ -323,10 +314,10 @@ bool RunLauncher()
     g.SetDx11("ANISO", kTexDx11[sel(cTex)]);
     g.SetDx11("BallBrighten", sel(cBright));
     g.SetDx11("MultiScreen", g.Dx11("MultiScreen", 0));
-    if (fixOn) {
-        // windowed at the size the display fix renders at; the fix keeps it there regardless
-        int w, h;
-        FittedSize(w, h);
+    int w, h;
+    if (DisplayRenderSize(displayMode, w, h)) {
+        // the game's own window mode/size, set to what the display fix renders at
+        // (the fix keeps it there regardless)
         g.windowMode = 0;
         g.width = w;
         g.height = h;
@@ -337,9 +328,9 @@ bool RunLauncher()
     }
     const bool ok = SaveGameSettings(folder, g);
     Log("Launcher: Play; settings %s (AA %d, texture filter %d, post %d, reflection %d, brighten %d, "
-        "language %d, ignore input %d, display fix %s)",
+        "language %d, ignore input %d, display %s)",
         ok ? "saved" : "could NOT be saved", g.antiAliasing, g.textureFilter, g.postProcessing,
-        g.ballReflection, sel(cBright), g.language, g.ignoreInput, fixOn ? "on" : "off");
+        g.ballReflection, sel(cBright), g.language, g.ignoreInput, sel(cDisplay) == 0 ? "fullscreen" : "windowed");
 
     const bool chooseDx11 = sel(cRenderer) == 0;
     WritePrivateProfileStringW(L"Launcher", L"Renderer", chooseDx11 ? L"DX11" : L"DX9", ini);

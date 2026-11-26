@@ -20,12 +20,17 @@
 // the fitted size into its set-display-mode function, keep it in windowed
 // mode (exclusive fullscreen would switch the monitor to a 16:9 mode and
 // stretch it), and pin MoveWindow to the fitted rect.
+//
+// Windowed mode (Mode=Windowed) uses the same machinery with a normal,
+// movable window instead: 16:9 at 75% of the fullscreen size, centred in the
+// work area, not resizable (the DX9 build doesn't handle a resized window).
+// The game renders at exactly the window's client size.
 #include "Common.h"
 #include <stdlib.h>
 #include <wchar.h>
 
 // ---------------------------------------------------------------- settings
-enum class Mode { Pillarbox, Off };
+enum class Mode { Pillarbox, Windowed, Off };
 static Mode g_mode = Mode::Pillarbox;
 static int g_aspectW = 16, g_aspectH = 9; // 0:0 = fill the whole monitor
 
@@ -35,7 +40,12 @@ static void LoadDisplaySettings()
     IniPath(ini);
     wchar_t buf[64];
     GetPrivateProfileStringW(L"Display", L"Mode", L"Fullscreen", buf, 64, ini);
-    g_mode = (_wcsicmp(buf, L"Off") == 0 || _wcsicmp(buf, L"Original") == 0) ? Mode::Off : Mode::Pillarbox;
+    if (_wcsicmp(buf, L"Off") == 0 || _wcsicmp(buf, L"Original") == 0)
+        g_mode = Mode::Off;
+    else if (_wcsicmp(buf, L"Windowed") == 0 || _wcsicmp(buf, L"Window") == 0)
+        g_mode = Mode::Windowed;
+    else
+        g_mode = Mode::Pillarbox;
 
     GetPrivateProfileStringW(L"Display", L"AspectRatio", L"16:9", buf, 64, ini);
     if (_wcsicmp(buf, L"Native") == 0 || _wcsicmp(buf, L"Fill") == 0) {
@@ -71,7 +81,50 @@ static RECT FitRect(const RECT& mon)
 static const GameBuild* g_build;
 static HMODULE g_exe;
 static bool g_fitReady;
-static RECT g_mon, g_fit;
+static RECT g_mon;   // primary monitor
+static RECT g_fit;   // game client area in screen coordinates (its size = render size)
+static RECT g_outer; // game window rect (= g_fit when borderless)
+
+const DWORD kWindowedStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+
+// Client and window rects for the given mode on the primary monitor.
+static void ComputeGeometry(Mode mode, RECT& client, RECT& outer)
+{
+    MONITORINFO mi = {sizeof(mi)};
+    GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    client = FitRect(mi.rcMonitor);
+    outer = client;
+    if (mode != Mode::Windowed) return;
+
+    // 75% of the fullscreen size, rounded down to whole 16:9 steps, shrunk further if the
+    // framed window wouldn't fit in the work area; centred in the work area
+    const RECT work = mi.rcWork;
+    int w = (client.right - client.left) * 3 / 4;
+    int h = (client.bottom - client.top) * 3 / 4;
+    if (g_aspectW && g_aspectH) {
+        int units = w / g_aspectW;
+        if (units * g_aspectH > h) units = h / g_aspectH;
+        for (;; --units) {
+            w = units * g_aspectW;
+            h = units * g_aspectH;
+            RECT r = {0, 0, w, h};
+            AdjustWindowRectEx(&r, kWindowedStyle, FALSE, 0);
+            if (units <= 1 || (r.right - r.left <= work.right - work.left && r.bottom - r.top <= work.bottom - work.top))
+                break;
+        }
+    }
+    RECT r = {0, 0, w, h};
+    AdjustWindowRectEx(&r, kWindowedStyle, FALSE, 0);
+    const int ow = r.right - r.left, oh = r.bottom - r.top;
+    outer.left = work.left + ((work.right - work.left) - ow) / 2;
+    outer.top = work.top + ((work.bottom - work.top) - oh) / 2;
+    outer.right = outer.left + ow;
+    outer.bottom = outer.top + oh;
+    client.left = outer.left - r.left;
+    client.top = outer.top - r.top;
+    client.right = client.left + w;
+    client.bottom = client.top + h;
+}
 
 // Settings + primary-monitor geometry, worked out once (after DllMain).
 static void EnsureFit()
@@ -82,13 +135,27 @@ static void EnsureFit()
     MONITORINFO mi = {sizeof(mi)};
     GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
     g_mon = mi.rcMonitor;
-    g_fit = FitRect(g_mon);
+    ComputeGeometry(g_mode, g_fit, g_outer);
     if (g_mode == Mode::Off)
         Log("Display: Mode=Off, leaving the game's display handling alone");
     else
-        Log("Display: monitor %ldx%ld, game %ldx%ld at %ld,%ld (aspect %d:%d)", g_mon.right - g_mon.left,
-            g_mon.bottom - g_mon.top, g_fit.right - g_fit.left, g_fit.bottom - g_fit.top, g_fit.left, g_fit.top,
-            g_aspectW, g_aspectH);
+        Log("Display: monitor %ldx%ld, %s game %ldx%ld at %ld,%ld (aspect %d:%d)", g_mon.right - g_mon.left,
+            g_mon.bottom - g_mon.top, g_mode == Mode::Windowed ? "windowed" : "fullscreen",
+            g_fit.right - g_fit.left, g_fit.bottom - g_fit.top, g_fit.left, g_fit.top, g_aspectW, g_aspectH);
+}
+
+// Render size for a display mode, as the DLL will set it up (used by the launcher).
+bool DisplayRenderSize(const wchar_t* mode, int& w, int& h)
+{
+    LoadDisplaySettings();
+    Mode m = Mode::Pillarbox;
+    if (_wcsicmp(mode, L"Windowed") == 0) m = Mode::Windowed;
+    else if (_wcsicmp(mode, L"Off") == 0) return false;
+    RECT client, outer;
+    ComputeGeometry(m, client, outer);
+    w = client.right - client.left;
+    h = client.bottom - client.top;
+    return true;
 }
 
 static void ForceWindowedMode()
@@ -96,7 +163,7 @@ static void ForceWindowedMode()
     if (g_build && g_build->windowModeVar) {
         int* mode = (int*)((BYTE*)g_exe + g_build->windowModeVar);
         if (*mode != 0) {
-            Log("Display: game set to window mode %d, using windowed (borderless) instead", *mode);
+            Log("Display: game set to window mode %d, using our window instead", *mode);
             *mode = 0;
         }
     }
@@ -230,12 +297,17 @@ static HWND WINAPI CreateWindowExA_Hook(DWORD exStyle, LPCSTR cls, LPCSTR title,
         return g_realCreateWindowExA(exStyle, cls, title, style, x, y, w, h, parent, menu, inst, param);
     ForceWindowedMode();
 
-    const RECT r = g_fit;
-    g_backdrop = CreateBackdrop(g_mon, inst);
-    // owned by the backdrop so it always stays in front of it; APPWINDOW keeps the taskbar button
-    HWND hwnd = g_realCreateWindowExA(exStyle | WS_EX_APPWINDOW, cls, title, WS_POPUP | (style & WS_VISIBLE),
-                                      r.left, r.top, r.right - r.left, r.bottom - r.top, g_backdrop, menu, inst,
-                                      param);
+    const RECT r = g_outer;
+    HWND hwnd;
+    if (g_mode == Mode::Windowed) {
+        hwnd = g_realCreateWindowExA(exStyle, cls, title, kWindowedStyle | (style & WS_VISIBLE), r.left, r.top,
+                                     r.right - r.left, r.bottom - r.top, nullptr, menu, inst, param);
+    } else {
+        g_backdrop = CreateBackdrop(g_mon, inst);
+        // owned by the backdrop so it always stays in front of it; APPWINDOW keeps the taskbar button
+        hwnd = g_realCreateWindowExA(exStyle | WS_EX_APPWINDOW, cls, title, WS_POPUP | (style & WS_VISIBLE), r.left,
+                                     r.top, r.right - r.left, r.bottom - r.top, g_backdrop, menu, inst, param);
+    }
     if (!hwnd) {
         if (g_backdrop) DestroyWindow(g_backdrop);
         g_backdrop = nullptr;
@@ -244,7 +316,8 @@ static HWND WINAPI CreateWindowExA_Hook(DWORD exStyle, LPCSTR cls, LPCSTR title,
     }
     g_game = hwnd;
     g_gameProc = (WNDPROC)SetWindowLongPtrA(hwnd, GWLP_WNDPROC, (LONG_PTR)GameProcHook);
-    Log("Display: game window created borderless at the fitted rect");
+    Log(g_mode == Mode::Windowed ? "Display: game window created (windowed, centred)"
+                                 : "Display: game window created borderless at the fitted rect");
     return hwnd;
 }
 
@@ -255,10 +328,18 @@ static MoveWindow_t g_realMoveWindow;
 static BOOL WINAPI MoveWindow_Hook(HWND hwnd, int x, int y, int w, int h, BOOL repaint)
 {
     if (hwnd && hwnd == g_game && g_mode != Mode::Off) {
-        x = g_fit.left;
-        y = g_fit.top;
-        w = g_fit.right - g_fit.left;
-        h = g_fit.bottom - g_fit.top;
+        if (g_mode == Mode::Windowed) {
+            // keep wherever the player moved it, just at our size
+            RECT cur;
+            GetWindowRect(hwnd, &cur);
+            x = cur.left;
+            y = cur.top;
+        } else {
+            x = g_outer.left;
+            y = g_outer.top;
+        }
+        w = g_outer.right - g_outer.left;
+        h = g_outer.bottom - g_outer.top;
     }
     return g_realMoveWindow(hwnd, x, y, w, h, repaint);
 }

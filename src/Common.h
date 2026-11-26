@@ -33,6 +33,9 @@ struct GameBuild {
 // Display fix (Display.cpp)
 void InstallDisplayFix(HMODULE exe, const GameBuild& build);
 void DisplayFixBeforeGameStart();
+// Render size the display fix will use for an INI display mode ("Fullscreen"/"Windowed");
+// false for "Off".
+bool DisplayRenderSize(const wchar_t* mode, int& w, int& h);
 
 // Launch settings window (Launcher.cpp), shown at the game's entry point
 void InstallLauncher(HMODULE exe);

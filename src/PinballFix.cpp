@@ -102,17 +102,34 @@ static void LimitFrame()
 }
 
 // ---------------------------------------------------------------- hooking
-struct GameBuild {
-    const wchar_t* exe;
-    DWORD timestamp;     // PE header TimeDateStamp of the supported build
-    DWORD frameTimer;    // RVA of the per-frame timer function
-    BYTE prologue[6];    // expected first bytes at frameTimer
-};
+void* InstallDetour(BYTE* at, const void* to, const BYTE* expect, size_t len)
+{
+    if (len < 5 || memcmp(at, expect, len) != 0) return nullptr;
+    // trampoline: original prologue + jmp back (prologues used here hold no relative operands)
+    BYTE* tramp = (BYTE*)VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!tramp) return nullptr;
+    memcpy(tramp, at, len);
+    tramp[len] = 0xE9;
+    *(DWORD*)(tramp + len + 1) = (DWORD)((at + len) - (tramp + len + 5));
 
-// PinballArcade11.exe v1.71.30 (Steam build 5650517, Oct 2020)
-static const GameBuild kDX11 = {
-    L"pinballarcade11.exe", 0x5F7DE4C5, 0x0009D7B0, // VA 0x49D7B0 at base 0x400000
-    {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14}, // push ebp; mov ebp,esp; sub esp,14h
+    DWORD old;
+    if (!VirtualProtect(at, len, PAGE_EXECUTE_READWRITE, &old)) return nullptr;
+    at[0] = 0xE9;
+    *(DWORD*)(at + 1) = (DWORD)((BYTE*)to - (at + 5));
+    for (size_t i = 5; i < len; ++i) at[i] = 0x90;
+    VirtualProtect(at, len, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), at, len);
+    return tramp;
+}
+
+// Supported builds: v1.71.30 (Steam build 5650517, Oct 2020). Addresses are
+// RVAs from the module's actual load address (the in-memory ImageBase field is
+// rewritten by the loader on relocation, so it can't be used to rebase VAs).
+static const GameBuild kBuilds[] = {
+    // DX11: frame timer at VA 0x49D7B0 (push ebp; mov ebp,esp; sub esp,14h)
+    {L"pinballarcade11.exe", true, 0x5F7DE4C5, 0x0009D7B0, 0, "GameWindowClass"},
+    // DX9: set-display-mode at VA 0x5BA5A0; window mode global at VA 0xD072C8
+    {L"pinballarcade.exe", false, 0x5F7DE48A, 0, 0x001BA5A0, "Pinball Arcade", 0x009072C8},
 };
 
 typedef void(__cdecl* FrameTimer_t)();
@@ -124,43 +141,13 @@ static void __cdecl FrameTimerHook()
     g_origFrameTimer();
 }
 
-static bool InstallJump(BYTE* at, const void* to, const BYTE* expect, size_t len)
+static void InstallSpeedFix(HMODULE exe, const GameBuild& b)
 {
-    if (memcmp(at, expect, len) != 0) return false;
-    // trampoline: original prologue + jmp back
-    BYTE* tramp = (BYTE*)VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    if (!tramp) return false;
-    memcpy(tramp, at, len);
-    tramp[len] = 0xE9;
-    *(DWORD*)(tramp + len + 1) = (DWORD)((at + len) - (tramp + len + 5));
-    g_origFrameTimer = (FrameTimer_t)tramp;
-
-    DWORD old;
-    if (!VirtualProtect(at, len, PAGE_EXECUTE_READWRITE, &old)) return false;
-    at[0] = 0xE9;
-    *(DWORD*)(at + 1) = (DWORD)((BYTE*)to - (at + 5));
-    for (size_t i = 5; i < len; ++i) at[i] = 0x90;
-    VirtualProtect(at, len, old, &old);
-    FlushInstructionCache(GetCurrentProcess(), at, len);
-    return true;
-}
-
-static void InstallSpeedFix(HMODULE exe)
-{
-    auto dos = (IMAGE_DOS_HEADER*)exe;
-    auto nt = (IMAGE_NT_HEADERS*)((BYTE*)exe + dos->e_lfanew);
-    if (nt->FileHeader.TimeDateStamp != kDX11.timestamp) {
-        Log("Speed fix: unknown PinballArcade11.exe build (timestamp %08X), not patching",
-            nt->FileHeader.TimeDateStamp);
-        return;
-    }
-    // RVA from the module's actual load address (the in-memory ImageBase field
-    // is rewritten by the loader on relocation, so it can't be used here)
-    BYTE* fn = (BYTE*)exe + kDX11.frameTimer;
-    if (InstallJump(fn, (void*)FrameTimerHook, kDX11.prologue, sizeof(kDX11.prologue)))
-        Log("Speed fix: DX11 frame timer hooked");
-    else
-        Log("Speed fix: frame timer bytes did not match, not patching");
+    static const BYTE prologue[] = {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14};
+    g_origFrameTimer = (FrameTimer_t)InstallDetour((BYTE*)exe + b.frameTimer, (void*)FrameTimerHook, prologue,
+                                                   sizeof(prologue));
+    Log(g_origFrameTimer ? "Speed fix: DX11 frame timer hooked"
+                         : "Speed fix: frame timer bytes did not match, not patching");
 }
 
 // ---------------------------------------------------------------- entry
@@ -181,12 +168,22 @@ static void Init()
     const wchar_t* exeName = wcsrchr(exePath, L'\\') ? wcsrchr(exePath, L'\\') + 1 : exePath;
     Log("Pinball Arcade Fix loaded into %ls", exeName);
 
-    if (_wcsicmp(exeName, kDX11.exe) == 0) {
-        InstallSpeedFix(GetModuleHandleW(nullptr));
-        InstallDisplayFix(GetModuleHandleW(nullptr));
+    HMODULE exe = GetModuleHandleW(nullptr);
+    auto nt = (IMAGE_NT_HEADERS*)((BYTE*)exe + ((IMAGE_DOS_HEADER*)exe)->e_lfanew);
+    for (const GameBuild& b : kBuilds) {
+        if (_wcsicmp(exeName, b.exe) != 0) continue;
+        if (nt->FileHeader.TimeDateStamp != b.timestamp) {
+            Log("Unknown %ls build (timestamp %08X), not patching", exeName, nt->FileHeader.TimeDateStamp);
+            return;
+        }
+        if (b.dx11)
+            InstallSpeedFix(exe, b);
+        else
+            Log("Speed fix: not needed (DX9 build has its own 60 fps cap)");
+        InstallDisplayFix(exe, b);
+        return;
     }
-    else
-        Log("Speed fix: not needed for this exe (DX9 build already caps at 60 fps)");
+    Log("Not a supported game exe, doing nothing");
 }
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID)

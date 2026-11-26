@@ -414,6 +414,48 @@ static const GameBuild kBuilds[] = {
      0, 0},
 };
 
+// ---------------------------------------------------------------- stuck initials overlay
+// Original game bug (reported by players long before this fix): after entering initials on
+// an emulated-ROM table such as Gopher, the on-screen "Select" overlay (GUI menu 0x23) stays
+// up through the next game and captures the flipper keys. The game shows that menu while a
+// table's display matches its "EnterInitials" pattern, but only some table types have the
+// code that closes it again ("if menu 0x23 and entry finished: go back a menu", e.g. VA
+// 0x4C33BA). For the rest it is never closed. We do the same thing generically: if the
+// EnterName menu has been open for 1.5 s on a ROM-initials table while the game's
+// EnterInitials flag is clear, call the game's own "back to previous menu" (VA 0x68F410).
+namespace Dx11 {
+const DWORD kCurMenu = 0x012982C0;       // VA 0x16982C0: current GUI menu id
+const DWORD kEnterInitials = 0x00D0E0EC; // VA 0x110E0EC: table display says "enter initials"
+const DWORD kTablePtr = 0x00B0A8FC;      // VA 0xF0A8FC: current table object
+const DWORD kRomInitials = 0x310FC;      // table field: initials entered through the ROM
+const DWORD kGetMenus = 0x00019AC0;      // VA 0x419AC0: menu manager singleton
+const DWORD kMenuBack = 0x0028F410;      // VA 0x68F410: menu manager "back" (thiscall)
+const int kEnterNameMenu = 0x23;
+}
+
+static void FixStuckInitialsOverlay()
+{
+    if (!g_build || !g_build->dx11) return;
+    BYTE* exe = (BYTE*)g_exe;
+    static int stuckFrames;
+    const int menu = *(int*)(exe + Dx11::kCurMenu);
+    BYTE* table = *(BYTE**)(exe + Dx11::kTablePtr);
+    const bool stuck = menu == Dx11::kEnterNameMenu && table && *(int*)(table + Dx11::kRomInitials) &&
+                       *(int*)(exe + Dx11::kEnterInitials) == 0;
+    if (!stuck) {
+        stuckFrames = 0;
+        return;
+    }
+    if (++stuckFrames < 90) return; // 1.5 s at 60 fps
+    stuckFrames = 0;
+    typedef void*(__cdecl * GetMenus_t)();
+    typedef void(__thiscall * MenuBack_t)(void*);
+    void* menus = ((GetMenus_t)(exe + Dx11::kGetMenus))();
+    if (!menus) return;
+    ((MenuBack_t)(exe + Dx11::kMenuBack))(menus);
+    Log("Game fix: closed the initials overlay left open after high-score entry");
+}
+
 typedef void(__cdecl* FrameTimer_t)();
 static FrameTimer_t g_origFrameTimer;
 
@@ -421,6 +463,7 @@ static void __cdecl FrameTimerHook()
 {
     LimitFrame();
     FrameStats();
+    FixStuckInitialsOverlay();
     g_origFrameTimer();
 }
 

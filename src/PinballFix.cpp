@@ -7,12 +7,20 @@
 // 16 ms every rendered frame and has no frame cap, so the table runs 2x fast
 // at 120 Hz, 4x at 240 Hz and faster still with vsync off. The DX9 build has
 // a built-in 60 fps cap and is unaffected. We restore the 60 fps cadence the
-// physics was tuned for by holding each DX11 frame to 1/60 s inside the
-// game's own per-frame timer function.
+// physics was tuned for.
+//
+// Pacing: a high-resolution timer inside the game's own per-frame timer
+// function holds each frame to 1/60 s, and we take over the game's Present
+// call to cap DXGI's frame queue at one frame so input stays responsive.
+// (An opt-in Pacing=Refresh mode presents every Nth refresh instead; in this
+// windowed swap chain it measured less even than the timer, so it is not the
+// default.)
 #include "Common.h"
 #include <stdio.h>
+#include <dxgi.h>
 
 #pragma comment(lib, "winmm.lib")
+#pragma comment(lib, "dxguid.lib")
 
 wchar_t g_dir[MAX_PATH];
 static FILE* g_log;
@@ -35,6 +43,7 @@ void Log(const char* fmt, ...)
 
 // ---------------------------------------------------------------- settings
 static double g_fps = 60.0;
+static bool g_pacingTimerOnly = true; // [Speed] Pacing=Timer (default) | Refresh
 
 static void LoadSettings()
 {
@@ -44,13 +53,102 @@ static void LoadSettings()
     GetPrivateProfileStringW(L"Speed", L"FrameRateCap", L"60", buf, 32, ini);
     double v = _wtof(buf);
     if (v >= 0.0) g_fps = v; // 0 disables the cap
+    GetPrivateProfileStringW(L"Speed", L"Pacing", L"Timer", buf, 32, ini);
+    g_pacingTimerOnly = _wcsicmp(buf, L"Refresh") != 0;
 }
 
 // ---------------------------------------------------------------- limiter
 static LARGE_INTEGER g_freq, g_next;
 static HANDLE g_timer;
+static double g_limitFps;          // timer cap actually applied
+static HMODULE g_exe;
+static const GameBuild* g_build;
 
 static void LoadSettings();
+
+// ---------------------------------------------------------------- present pacing
+// We take over the game's one Present call (VA 0x73DB19: push 1 / push eax /
+// call [ecx+20h], with the flags argument already pushed and the swap chain in
+// eax) so we can (a) choose the sync interval and (b) cap DXGI's frame queue
+// at one frame. Without (b), any time the game produces frames faster than
+// the display consumes them, DXGI queues up to three, adding ~50 ms of input
+// lag.
+static int g_syncInterval = 1;     // decided on the first frame
+static bool g_refreshLocked;
+
+static int ChooseSyncInterval()
+{
+    if (g_fps <= 0.0) return 1;
+    if (g_pacingTimerOnly) {
+        Log("Speed fix: presenting every refresh, pacing with the timer");
+        return 1;
+    }
+    DEVMODEW dm = {};
+    dm.dmSize = sizeof(dm);
+    if (!EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) || dm.dmDisplayFrequency <= 1) return 1;
+    const double hz = dm.dmDisplayFrequency;
+    const int n = (int)(hz / g_fps + 0.5);
+    if (n < 1 || n > 4 || hz - n * g_fps > 1.5 || n * g_fps - hz > 1.5) {
+        Log("Speed fix: %u Hz is not a multiple of %.0f fps, pacing with the timer", dm.dmDisplayFrequency, g_fps);
+        return 1;
+    }
+    Log("Speed fix: %u Hz display, presenting every %d refresh(es) for an even %.0f fps", dm.dmDisplayFrequency, n,
+        g_fps);
+    g_refreshLocked = true;
+    return n;
+}
+
+static IDXGISwapChain* g_swap;
+
+static int __cdecl OnPresent(IDXGISwapChain* swap)
+{
+    static IDXGISwapChain* configured;
+    if (swap != configured) { // first frame, or the game recreated its device
+        configured = swap;
+        IDXGIDevice1* dev = nullptr;
+        if (SUCCEEDED(swap->GetDevice(__uuidof(IDXGIDevice1), (void**)&dev)) && dev) {
+            dev->SetMaximumFrameLatency(1);
+            dev->Release();
+            Log("Speed fix: DXGI frame queue limited to 1");
+        }
+    }
+    g_swap = swap;
+    return g_syncInterval;
+}
+
+// Entered by "call" from the patched site: [esp]=return, [esp+4]=flags, eax=swap chain.
+static __declspec(naked) void PresentThunk()
+{
+    __asm {
+        push eax
+        call OnPresent           ; eax = sync interval
+        add esp, 4
+        mov ecx, [esp + 4]       ; flags
+        push ecx
+        push eax
+        mov eax, g_swap
+        push eax
+        mov ecx, [eax]
+        call dword ptr [ecx + 0x20]  ; IDXGISwapChain::Present (stdcall, pops 3)
+        ret 4                    ; also drop the flags the game pushed
+    }
+}
+
+static bool InstallPresentHook()
+{
+    if (!g_build || !g_build->presentSite) return false;
+    BYTE* at = (BYTE*)g_exe + g_build->presentSite;
+    static const BYTE expect[] = {0x6A, 0x01, 0x50, 0xFF, 0x51, 0x20}; // push 1; push eax; call [ecx+20h]
+    if (memcmp(at, expect, sizeof(expect)) != 0) return false;
+    DWORD old;
+    VirtualProtect(at, sizeof(expect), PAGE_EXECUTE_READWRITE, &old);
+    at[0] = 0xE8;
+    *(DWORD*)(at + 1) = (DWORD)((BYTE*)PresentThunk - (at + 5));
+    at[5] = 0x90;
+    VirtualProtect(at, sizeof(expect), old, &old);
+    FlushInstructionCache(GetCurrentProcess(), at, sizeof(expect));
+    return true;
+}
 
 // Settings and the timer are set up on the first frame, not in DllMain:
 // reading the INI under the loader lock can deadlock the game at startup.
@@ -63,15 +161,44 @@ static void FirstFrameInit()
         timeBeginPeriod(1);
         Log("High-resolution timer unavailable, using Sleep with 1 ms period");
     }
-    Log("Speed fix: frame cap active at %.2f fps", g_fps);
+    g_syncInterval = ChooseSyncInterval();
+    // refresh-locked: vsync paces, the timer only backstops a driver forcing vsync off
+    g_limitFps = g_refreshLocked ? g_fps * 1.02 : g_fps;
+    if (g_fps > 0.0)
+        Log("Speed fix: timer cap at %.2f fps", g_limitFps);
+    else
+        Log("Speed fix: FrameRateCap=0, cap disabled");
+}
+
+// Frame-interval statistics, logged every ~10 s, to diagnose pacing.
+static void FrameStats()
+{
+    static LARGE_INTEGER last;
+    static double sum, worst;
+    static int frames, slow;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    if (last.QuadPart) {
+        const double ms = (now.QuadPart - last.QuadPart) * 1000.0 / g_freq.QuadPart;
+        sum += ms;
+        if (ms > worst) worst = ms;
+        if (ms > 20.0) ++slow;
+        if (++frames == 600) {
+            Log("Frames: avg %.2f ms (%.1f fps), worst %.1f ms, %d of 600 over 20 ms", sum / frames,
+                1000.0 * frames / sum, worst, slow);
+            sum = worst = 0;
+            frames = slow = 0;
+        }
+    }
+    last = now;
 }
 
 static void LimitFrame()
 {
     static bool init = false;
     if (!init) { init = true; FirstFrameInit(); }
-    if (g_fps <= 0.0) return;
-    const LONGLONG period = (LONGLONG)(g_freq.QuadPart / g_fps);
+    if (g_limitFps <= 0.0) return;
+    const LONGLONG period = (LONGLONG)(g_freq.QuadPart / g_limitFps);
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     if (g_next.QuadPart == 0 || now.QuadPart - g_next.QuadPart > period * 4) {
@@ -127,9 +254,10 @@ void* InstallDetour(BYTE* at, const void* to, const BYTE* expect, size_t len)
 // rewritten by the loader on relocation, so it can't be used to rebase VAs).
 static const GameBuild kBuilds[] = {
     // DX11: frame timer at VA 0x49D7B0 (push ebp; mov ebp,esp; sub esp,14h)
-    {L"pinballarcade11.exe", true, 0x5F7DE4C5, 0x0009D7B0, 0, "GameWindowClass"},
+    // Present call site at VA 0x73DB19
+    {L"pinballarcade11.exe", true, 0x5F7DE4C5, 0x0009D7B0, 0, "GameWindowClass", 0, 0x0033DB19},
     // DX9: set-display-mode at VA 0x5BA5A0; window mode global at VA 0xD072C8
-    {L"pinballarcade.exe", false, 0x5F7DE48A, 0, 0x001BA5A0, "Pinball Arcade", 0x009072C8},
+    {L"pinballarcade.exe", false, 0x5F7DE48A, 0, 0x001BA5A0, "Pinball Arcade", 0x009072C8, 0},
 };
 
 typedef void(__cdecl* FrameTimer_t)();
@@ -138,11 +266,15 @@ static FrameTimer_t g_origFrameTimer;
 static void __cdecl FrameTimerHook()
 {
     LimitFrame();
+    FrameStats();
     g_origFrameTimer();
 }
 
 static void InstallSpeedFix(HMODULE exe, const GameBuild& b)
 {
+    g_exe = exe;
+    g_build = &b;
+    Log(InstallPresentHook() ? "Speed fix: Present hooked" : "Speed fix: Present bytes did not match, not hooked");
     static const BYTE prologue[] = {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14};
     g_origFrameTimer = (FrameTimer_t)InstallDetour((BYTE*)exe + b.frameTimer, (void*)FrameTimerHook, prologue,
                                                    sizeof(prologue));

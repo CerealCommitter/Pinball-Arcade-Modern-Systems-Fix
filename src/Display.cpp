@@ -132,7 +132,9 @@ static HWND CreateBackdrop(const RECT& mon, HINSTANCE inst)
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszClassName = L"PinballArcadeFixBackdrop";
     RegisterClassW(&wc);
-    return CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, wc.lpszClassName, L"", WS_POPUP | WS_VISIBLE,
+    // created hidden: it is shown (without activation) only once the game window is up, so it
+    // can't use up the foreground permission Windows grants a freshly launched program
+    return CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, wc.lpszClassName, L"", WS_POPUP,
                            mon.left, mon.top, mon.right - mon.left, mon.bottom - mon.top,
                            nullptr, nullptr, inst, nullptr);
 }
@@ -142,7 +144,7 @@ static LRESULT CALLBACK GameProcHook(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
     case WM_SIZE:
-        if (g_backdrop)
+        if (g_backdrop && (w == SIZE_MINIMIZED || IsWindowVisible(h)))
             ShowWindow(g_backdrop, w == SIZE_MINIMIZED ? SW_HIDE : SW_SHOWNOACTIVATE);
         break;
     case WM_NCDESTROY: {
@@ -153,6 +155,56 @@ static LRESULT CALLBACK GameProcHook(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     }
     return CallWindowProcA(g_gameProc, h, m, w, l);
+}
+
+// ---------------------------------------------------------------- startup focus
+// The DX11 build only runs its game loop while it believes it is the active
+// window, and it learns that solely from WM_ACTIVATE. When Steam starts the
+// game, Windows may refuse to bring the new window to the front, so it sat
+// frozen on "Press Start" until the user alt-tabbed. When the game shows its
+// window we make sure it really is in front, using the same hand-off that
+// fixed ABZU's startup focus.
+typedef BOOL(WINAPI* ShowWindow_t)(HWND, int);
+static ShowWindow_t g_realShowWindow;
+
+static bool TakeFocus(HWND w)
+{
+    if (GetForegroundWindow() == w) return true;
+    HWND fg = GetForegroundWindow();
+    const DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    const DWORD me = GetCurrentThreadId();
+    const bool attached = fgThread && fgThread != me && AttachThreadInput(me, fgThread, TRUE);
+    BringWindowToTop(w);
+    SetForegroundWindow(w);
+    if (attached) AttachThreadInput(me, fgThread, FALSE);
+    if (GetForegroundWindow() == w) return true;
+
+    // Still refused: a synthetic Alt tap counts as fresh input and lifts the foreground lock.
+    INPUT in[2] = {};
+    in[0].type = in[1].type = INPUT_KEYBOARD;
+    in[0].ki.wVk = in[1].ki.wVk = VK_MENU;
+    in[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(1, &in[0], sizeof(INPUT));
+    SetForegroundWindow(w);
+    SendInput(1, &in[1], sizeof(INPUT));
+    return GetForegroundWindow() == w;
+}
+
+static BOOL WINAPI ShowWindow_Hook(HWND hwnd, int cmd)
+{
+    BOOL r = g_realShowWindow(hwnd, cmd);
+    if (hwnd && hwnd == g_game && cmd != SW_HIDE && cmd != SW_MINIMIZE && cmd != SW_SHOWMINIMIZED &&
+        cmd != SW_SHOWMINNOACTIVE && cmd != SW_FORCEMINIMIZE) {
+        if (g_backdrop) g_realShowWindow(g_backdrop, SW_SHOWNOACTIVATE);
+        static bool once = false;
+        if (!once) {
+            once = true;
+            const bool had = GetForegroundWindow() == hwnd;
+            const bool ok = had || TakeFocus(hwnd);
+            Log("Display: game window shown; focus %s", had ? "granted by Windows" : ok ? "taken" : "still refused");
+        }
+    }
+    return r;
 }
 
 // ---------------------------------------------------------------- CreateWindowExA hook
@@ -294,6 +346,10 @@ void InstallDisplayFix(HMODULE exe, const GameBuild& build)
         Log("Display: CreateWindowExA hooked");
     else
         Log("Display: CreateWindowExA import not found, display fix inactive");
+    if (!PatchImport(exe, "user32.dll", "ShowWindow", (void*)ShowWindow_Hook, (void**)&g_realShowWindow)) {
+        g_realShowWindow = ShowWindow;
+        Log("Display: ShowWindow import not found, startup focus fix inactive");
+    }
 
     if (build.setDisplayMode) {
         if (PatchImport(exe, "user32.dll", "MoveWindow", (void*)MoveWindow_Hook, (void**)&g_realMoveWindow))

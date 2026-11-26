@@ -467,6 +467,7 @@ static void Init()
         else
             Log("Speed fix: not needed (DX9 build has its own 60 fps cap)");
         InstallDisplayFix(exe, b);
+        InstallLauncher(exe);
         return;
     }
     Log("Not a supported game exe, doing nothing");

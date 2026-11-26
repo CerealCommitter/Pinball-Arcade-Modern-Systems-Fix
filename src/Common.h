@@ -25,3 +25,7 @@ struct GameBuild {
 
 // Display fix (Display.cpp)
 void InstallDisplayFix(HMODULE exe, const GameBuild& build);
+void DisplayFixBeforeGameStart();
+
+// Launch settings window (Launcher.cpp), shown at the game's entry point
+void InstallLauncher(HMODULE exe);

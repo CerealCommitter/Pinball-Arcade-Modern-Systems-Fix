@@ -7,8 +7,9 @@ if not defined VSDIR (echo MSVC tools not found & exit /b 1)
 call "%VSDIR%\VC\Auxiliary\Build\vcvars32.bat" >nul || exit /b 1
 if not exist bin mkdir bin
 if not exist obj mkdir obj
+rc /nologo /fo obj\resources.res src\resources.rc || exit /b 1
 cl /nologo /O2 /MT /W3 /std:c++17 /EHsc /GS- /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS /Foobj\ ^
-   src\PinballFix.cpp src\Display.cpp src\proxy_xinput.cpp ^
+   src\PinballFix.cpp src\Display.cpp src\Launcher.cpp src\LauncherUI.cpp src\proxy_xinput.cpp obj\resources.res ^
    /LD /Febin\xinput1_3.dll ^
-   /link /DEF:src\xinput1_3.def /SAFESEH:NO user32.lib kernel32.lib gdi32.lib winmm.lib || exit /b 1
+   /link /DEF:src\xinput1_3.def /SAFESEH:NO user32.lib kernel32.lib gdi32.lib winmm.lib advapi32.lib gdiplus.lib dwmapi.lib ole32.lib || exit /b 1
 echo Built bin\xinput1_3.dll

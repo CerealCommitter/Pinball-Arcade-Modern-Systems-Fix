@@ -368,19 +368,18 @@ static void MakeDpiAware()
         Log("Display: could not set DPI awareness (%lu)", GetLastError());
 }
 
-void InstallDisplayFix(HMODULE exe, const GameBuild& build)
+// Runs at the game's entry point, after the launch window and before the game reads its
+// settings, so it sees the display mode the player just chose.
+void DisplayFixBeforeGameStart()
 {
-    g_build = &build;
-    g_exe = exe;
-    MakeDpiAware();
-
-    // The launch configuration utility can save "Fullscreen" for DX11, which switches the
-    // game to a path that renders at a fixed back-buffer size into the corner of our window.
-    // The game reads that key at exactly one place, by name, so renaming the key string in
-    // memory makes the lookup miss and the game falls back to its default, windowed.
+    if (!g_build) return;
+    // The old configuration utility could save "Fullscreen" for DX11, which switches the game
+    // to a path that renders at a fixed back-buffer size into the corner of our window. The
+    // game reads that key at exactly one place, by name, so renaming the key string in memory
+    // makes the lookup miss and the game falls back to its default, windowed.
     LoadDisplaySettings();
-    if (g_mode != Mode::Off && build.fullscreenKey) {
-        char* key = (char*)exe + build.fullscreenKey;
+    if (g_mode != Mode::Off && g_build->fullscreenKey) {
+        char* key = (char*)g_exe + g_build->fullscreenKey;
         if (memcmp(key, "Fullscreen", 11) == 0) {
             DWORD old;
             VirtualProtect(key, 11, PAGE_READWRITE, &old);
@@ -389,6 +388,14 @@ void InstallDisplayFix(HMODULE exe, const GameBuild& build)
             Log("Display: DX11 Fullscreen setting ignored (borderless window is used instead)");
         }
     }
+}
+
+void InstallDisplayFix(HMODULE exe, const GameBuild& build)
+{
+    g_build = &build;
+    g_exe = exe;
+    MakeDpiAware();
+
     if (PatchImport(exe, "user32.dll", "CreateWindowExA", (void*)CreateWindowExA_Hook,
                     (void**)&g_realCreateWindowExA))
         Log("Display: CreateWindowExA hooked");

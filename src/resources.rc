@@ -1,0 +1,4 @@
+// Embedded resources for the fix DLL.
+#include "LauncherUI.h"
+
+IDR_LAUNCHER_LOGO RCDATA "..\\assets\\logo.png"

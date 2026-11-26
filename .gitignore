@@ -1,0 +1,7 @@
+obj/
+bin/*.exp
+bin/*.lib
+bin/*.obj
+*.log
+dist/
+backup/

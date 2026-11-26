@@ -406,12 +406,12 @@ void* InstallDetour(BYTE* at, const void* to, const BYTE* expect, size_t len)
 // rewritten by the loader on relocation, so it can't be used to rebase VAs).
 static const GameBuild kBuilds[] = {
     // DX11: frame timer at VA 0x49D7B0 (push ebp; mov ebp,esp; sub esp,14h)
-    // Present call site at VA 0x73DB19
-    {L"pinballarcade11.exe", true, 0x5F7DE4C5, 0x0009D7B0, 0, "GameWindowClass", 0, 0, 0, 0x0033DB19},
+    // Present call site at VA 0x73DB19; "Fullscreen" key string at VA 0xAC1A94
+    {L"pinballarcade11.exe", true, 0x5F7DE4C5, 0x0009D7B0, 0, "GameWindowClass", 0, 0, 0, 0x006C1A94, 0x0033DB19},
     // DX9: set-display-mode at VA 0x5BA5A0; window mode at VA 0xD072C8; UI tier at VA 0xB46430;
     //      screen-size snapshot at VA 0xD41A10
     {L"pinballarcade.exe", false, 0x5F7DE48A, 0, 0x001BA5A0, "Pinball Arcade", 0x009072C8, 0x00746430, 0x00941A10,
-     0},
+     0, 0},
 };
 
 typedef void(__cdecl* FrameTimer_t)();

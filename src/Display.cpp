@@ -143,6 +143,12 @@ static HWND CreateBackdrop(const RECT& mon, HINSTANCE inst)
 static LRESULT CALLBACK GameProcHook(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+        // Alt+Enter is the game's own toggle into its exclusive-fullscreen path, which
+        // renders at a fixed size and ignores our window; swallow it.
+        if (w == VK_RETURN) return 0;
+        break;
     case WM_SIZE:
         if (g_backdrop && (w == SIZE_MINIMIZED || IsWindowVisible(h)))
             ShowWindow(g_backdrop, w == SIZE_MINIMIZED ? SW_HIDE : SW_SHOWNOACTIVATE);
@@ -367,6 +373,22 @@ void InstallDisplayFix(HMODULE exe, const GameBuild& build)
     g_build = &build;
     g_exe = exe;
     MakeDpiAware();
+
+    // The launch configuration utility can save "Fullscreen" for DX11, which switches the
+    // game to a path that renders at a fixed back-buffer size into the corner of our window.
+    // The game reads that key at exactly one place, by name, so renaming the key string in
+    // memory makes the lookup miss and the game falls back to its default, windowed.
+    LoadDisplaySettings();
+    if (g_mode != Mode::Off && build.fullscreenKey) {
+        char* key = (char*)exe + build.fullscreenKey;
+        if (memcmp(key, "Fullscreen", 11) == 0) {
+            DWORD old;
+            VirtualProtect(key, 11, PAGE_READWRITE, &old);
+            key[0] = '_'; // "_ullscreen": not present in the settings file
+            VirtualProtect(key, 11, old, &old);
+            Log("Display: DX11 Fullscreen setting ignored (borderless window is used instead)");
+        }
+    }
     if (PatchImport(exe, "user32.dll", "CreateWindowExA", (void*)CreateWindowExA_Hook,
                     (void**)&g_realCreateWindowExA))
         Log("Display: CreateWindowExA hooked");

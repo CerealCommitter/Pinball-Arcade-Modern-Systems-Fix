@@ -19,6 +19,7 @@ struct GameBuild {
     DWORD windowModeVar;  // DX9: RVA of the window-mode global (0 windowed, 1 fullscreen, 2 fullscreen window)
     DWORD uiTierVar;      // DX9: RVA of the UI quality tier (0 small, 1 >= 1280x720, 2 >= ~1680x1050)
     DWORD screenSizeVar;  // DX9: RVA of u16 width,height snapshot taken at window creation (menu background etc.)
+    DWORD fullscreenKey;  // DX11: RVA of the "Fullscreen" settings-key string (read at one site only)
     DWORD presentSite;    // DX11: RVA of "push 1; push eax; call [ecx+20h]" (the Present call)
 };
 

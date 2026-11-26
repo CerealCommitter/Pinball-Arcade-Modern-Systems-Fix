@@ -177,8 +177,30 @@ static bool PatchImport(HMODULE mod, const char* dll, const char* func, void* ho
     return false;
 }
 
+// The exe has no DPI-awareness manifest. Under Windows display scaling
+// (e.g. a 4K monitor at 150%) it would be told the monitor is smaller and be
+// bitmap-stretched by Windows, i.e. blurry. Declaring per-monitor DPI
+// awareness before any window exists makes it render at true pixels.
+static void MakeDpiAware()
+{
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    typedef BOOL(WINAPI * SetCtx_t)(HANDLE);
+    if (auto setCtx = (SetCtx_t)GetProcAddress(user32, "SetProcessDpiAwarenessContext")) {
+        if (setCtx((HANDLE)-4 /*PER_MONITOR_AWARE_V2*/) || setCtx((HANDLE)-3 /*PER_MONITOR_AWARE*/)) {
+            Log("Display: per-monitor DPI aware");
+            return;
+        }
+    }
+    typedef BOOL(WINAPI * SetAware_t)();
+    if (auto setAware = (SetAware_t)GetProcAddress(user32, "SetProcessDPIAware"); setAware && setAware())
+        Log("Display: system DPI aware");
+    else
+        Log("Display: could not set DPI awareness (%lu)", GetLastError());
+}
+
 void InstallDisplayFix(HMODULE exe)
 {
+    MakeDpiAware();
     if (PatchImport(exe, "user32.dll", "CreateWindowExA", (void*)CreateWindowExA_Hook,
                     (void**)&g_realCreateWindowExA))
         Log("Display: CreateWindowExA hooked");

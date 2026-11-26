@@ -1,4 +1,7 @@
-// Pinball Arcade fix: game speed.
+// Pinball Arcade fix: entry point, logging and the game-speed fix.
+// (Screen resolution handling lives in Display.cpp.)
+//
+// Game speed:
 //
 // The DX11 build (PinballArcade11.exe) advances the simulation by a fixed
 // 16 ms every rendered frame and has no frame cap, so the table runs 2x fast
@@ -6,15 +9,20 @@
 // a built-in 60 fps cap and is unaffected. We restore the 60 fps cadence the
 // physics was tuned for by holding each DX11 frame to 1/60 s inside the
 // game's own per-frame timer function.
-#include <windows.h>
+#include "Common.h"
 #include <stdio.h>
 
 #pragma comment(lib, "winmm.lib")
 
-static wchar_t g_dir[MAX_PATH];
+wchar_t g_dir[MAX_PATH];
 static FILE* g_log;
 
-static void Log(const char* fmt, ...)
+void IniPath(wchar_t (&out)[MAX_PATH])
+{
+    wsprintfW(out, L"%sPinballArcadeFix.ini", g_dir);
+}
+
+void Log(const char* fmt, ...)
 {
     if (!g_log) return;
     va_list ap;
@@ -31,7 +39,7 @@ static double g_fps = 60.0;
 static void LoadSettings()
 {
     wchar_t ini[MAX_PATH];
-    wsprintfW(ini, L"%sPinballArcadeFix.ini", g_dir);
+    IniPath(ini);
     wchar_t buf[32];
     GetPrivateProfileStringW(L"Speed", L"FrameRateCap", L"60", buf, 32, ini);
     double v = _wtof(buf);
@@ -173,8 +181,10 @@ static void Init()
     const wchar_t* exeName = wcsrchr(exePath, L'\\') ? wcsrchr(exePath, L'\\') + 1 : exePath;
     Log("Pinball Arcade Fix loaded into %ls", exeName);
 
-    if (_wcsicmp(exeName, kDX11.exe) == 0)
+    if (_wcsicmp(exeName, kDX11.exe) == 0) {
         InstallSpeedFix(GetModuleHandleW(nullptr));
+        InstallDisplayFix(GetModuleHandleW(nullptr));
+    }
     else
         Log("Speed fix: not needed for this exe (DX9 build already caps at 60 fps)");
 }

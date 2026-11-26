@@ -185,6 +185,56 @@ void FittedSize(int& w, int& h)
     else h = mw * 9 / 16;
 }
 
+// ---------------------------------------------------------------- renderer switch
+// Steam asks which launch option to run unless the player ticks "remember my choice"; with
+// that set, the Renderer choice here lets them switch between the DX11 and DX9 builds anyway.
+// We start the other exe ourselves (it inherits Steam's environment, including SteamAppId, so
+// it connects to Steam normally) and mark it so its launcher doesn't show a second time.
+const wchar_t* kRelaunchedVar = L"PINBALLARCADEFIX_RELAUNCHED";
+
+bool CurrentIsDx11()
+{
+    wchar_t path[MAX_PATH];
+    GetModuleFileNameW(nullptr, path, MAX_PATH);
+    const wchar_t* name = wcsrchr(path, L'\\') ? wcsrchr(path, L'\\') + 1 : path;
+    return _wcsicmp(name, L"PinballArcade11.exe") == 0;
+}
+
+// Starts the other build with the same arguments; returns false if it couldn't be started.
+bool StartOtherRenderer(bool dx11)
+{
+    wchar_t dir[MAX_PATH];
+    GetModuleFileNameW(nullptr, dir, MAX_PATH);
+    if (wchar_t* slash = wcsrchr(dir, L'\\')) slash[1] = 0;
+    const std::wstring exe = std::wstring(dir) + (dx11 ? L"PinballArcade11.exe" : L"PinballArcade.exe");
+
+    // keep the original arguments: skip the (possibly quoted) program name in our command line
+    const wchar_t* args = GetCommandLineW();
+    if (*args == L'"') {
+        ++args;
+        while (*args && *args != L'"') ++args;
+        if (*args) ++args;
+    } else {
+        while (*args && *args != L' ' && *args != L'\t') ++args;
+    }
+    std::wstring cmd = L"\"" + exe + L"\"" + args;
+
+    SetEnvironmentVariableW(kRelaunchedVar, L"1");
+    STARTUPINFOW si = {sizeof(si)};
+    PROCESS_INFORMATION pi = {};
+    const BOOL ok = CreateProcessW(exe.c_str(), &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, dir, &si, &pi);
+    SetEnvironmentVariableW(kRelaunchedVar, nullptr);
+    if (!ok) {
+        Log("Launcher: could not start %ls (error %lu), staying on this renderer", exe.c_str(), GetLastError());
+        return false;
+    }
+    AllowSetForegroundWindow(pi.dwProcessId); // let the new game window come to the front
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    Log("Launcher: switched to %ls", dx11 ? L"DirectX 11" : L"DirectX 9");
+    return true;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- launcher
@@ -193,10 +243,24 @@ bool RunLauncher()
 {
     wchar_t ini[MAX_PATH];
     IniPath(ini);
+
+    // started by our own renderer switch: the player already chose everything
+    if (GetEnvironmentVariableW(kRelaunchedVar, nullptr, 0)) {
+        SetEnvironmentVariableW(kRelaunchedVar, nullptr);
+        Log("Launcher: skipped (started by the renderer switch)");
+        return true;
+    }
+
+    const bool isDx11 = CurrentIsDx11();
+    wchar_t renderer[16];
+    GetPrivateProfileStringW(L"Launcher", L"Renderer", isDx11 ? L"DX11" : L"DX9", renderer, 16, ini);
+    const bool wantDx11 = _wcsicmp(renderer, L"DX9") != 0;
+
     const bool showAtLaunch = GetPrivateProfileIntW(L"Launcher", L"ShowAtLaunch", 1, ini) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     if (!showAtLaunch && !shift) {
         Log("Launcher: skipped (ShowAtLaunch=0; hold Shift while starting to open it)");
+        if (wantDx11 != isDx11 && StartOtherRenderer(wantDx11)) ExitProcess(0);
         return true;
     }
 
@@ -208,12 +272,13 @@ bool RunLauncher()
     GetPrivateProfileStringW(L"Display", L"Mode", L"Fullscreen", mode, 32, ini);
     const bool original = _wcsicmp(mode, L"Off") == 0 || _wcsicmp(mode, L"Original") == 0;
 
-    enum { cDisplay, cAA, cTex, cPost, cReflect, cBright, cLang, cInput };
+    enum { cRenderer, cDisplay, cAA, cTex, cPost, cReflect, cBright, cLang, cInput };
     LauncherSpec spec;
     spec.windowTitle = L"Pinball Arcade - Modern Systems Fix";
     spec.gameTitle = L"Pinball Arcade";
     spec.subtitle = L"Modern Systems Fix";
     spec.choices = {
+        {L"Renderer", {L"DirectX 11 (recommended)", L"DirectX 9"}, wantDx11 ? 0 : 1},
         {L"Display", {L"Fullscreen 16:9 with black bars", L"Original game window (fix off)"}, original ? 1 : 0},
         {L"Anti-aliasing", {L"Off", L"4x", L"8x"},
          IndexOf(kAaDx11, g.Dx11("MSAAS", kAaDx11[IndexOf(kAaDx9, g.antiAliasing, 0)]), 0)},
@@ -274,6 +339,10 @@ bool RunLauncher()
         "language %d, ignore input %d, display fix %s)",
         ok ? "saved" : "could NOT be saved", g.antiAliasing, g.textureFilter, g.postProcessing,
         g.ballReflection, sel(cBright), g.language, g.ignoreInput, fixOn ? "on" : "off");
+
+    const bool chooseDx11 = sel(cRenderer) == 0;
+    WritePrivateProfileStringW(L"Launcher", L"Renderer", chooseDx11 ? L"DX11" : L"DX9", ini);
+    if (chooseDx11 != isDx11 && StartOtherRenderer(chooseDx11)) ExitProcess(0);
     return true;
 }
 

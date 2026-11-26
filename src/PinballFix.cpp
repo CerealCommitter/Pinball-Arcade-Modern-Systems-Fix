@@ -43,6 +43,7 @@ void Log(const char* fmt, ...)
 
 // ---------------------------------------------------------------- settings
 static double g_fps = 60.0;
+static bool g_ioLog;               // [Debug] IoLog=1: per-250 ms read stats
 static bool g_pacingTimerOnly = true; // [Speed] Pacing=Timer (default) | Refresh
 
 static void LoadSettings()
@@ -55,6 +56,7 @@ static void LoadSettings()
     if (v >= 0.0) g_fps = v; // 0 disables the cap
     GetPrivateProfileStringW(L"Speed", L"Pacing", L"Timer", buf, 32, ini);
     g_pacingTimerOnly = _wcsicmp(buf, L"Refresh") != 0;
+    g_ioLog = GetPrivateProfileIntW(L"Debug", L"IoLog", 0, ini) != 0;
 }
 
 // ---------------------------------------------------------------- limiter
@@ -63,6 +65,7 @@ static HANDLE g_timer;
 static double g_limitFps;          // timer cap actually applied
 static bool g_loading = true;      // startup loading in progress (see UpdateStartupLoading)
 static LONGLONG g_startQpc;
+static bool g_tableLoading;        // a table (or other content) is streaming in (see UpdateTableLoading)
 volatile bool g_padPressed;        // set by the XInput proxy when a controller button is down
 static HMODULE g_exe;
 static const GameBuild* g_build;
@@ -116,7 +119,7 @@ static int __cdecl OnPresent(IDXGISwapChain* swap)
         }
     }
     g_swap = swap;
-    return g_loading ? 0 : g_syncInterval;
+    return (g_loading || g_tableLoading) ? 0 : g_syncInterval;
 }
 
 // Entered by "call" from the patched site: [esp]=return, [esp+4]=flags, eax=swap chain.
@@ -263,15 +266,90 @@ static void UpdateStartupLoading()
     }
 }
 
+// ---------------------------------------------------------------- table loading
+// Table loads stream the same way: measured on one load, the game read from
+// disk on 13-16 of every 16 frames for ~25 s at 60 fps, while gameplay itself
+// (game start, flippers, scoring) read nothing at all. So, per frame: when at
+// least 12 of the last 16 frames read from disk we lift the cap; after 8
+// frames in a row without reads it is back. At uncapped speed that tail is a
+// few milliseconds, ~0.1 s of game time on a table that is sitting idle.
+static void UpdateTableLoading()
+{
+    static ULONGLONG lastBytes;
+    static bool primed;
+    static unsigned history;     // bit i = frame i ago read from disk
+    static int quietRun;
+    IO_COUNTERS io;
+    if (!GetProcessIoCounters(GetCurrentProcess(), &io)) return;
+    if (!primed) {
+        primed = true;
+        lastBytes = io.ReadTransferCount;
+        return;
+    }
+    const bool read = io.ReadTransferCount != lastBytes;
+    lastBytes = io.ReadTransferCount;
+    history = ((history << 1) | (read ? 1u : 0u)) & 0xFFFF;
+    quietRun = read ? 0 : quietRun + 1;
+
+    int recent = 0;
+    for (unsigned h = history; h; h &= h - 1) ++recent;
+    // reads come in bursts, so the cap toggles a few times per load; log once per load
+    static LONGLONG burstStart, lastOff;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    if (!g_tableLoading && recent >= 12) {
+        g_tableLoading = true;
+        if (!burstStart || now.QuadPart - lastOff > g_freq.QuadPart * 2) burstStart = now.QuadPart;
+    } else if (g_tableLoading && quietRun >= 8) {
+        g_tableLoading = false;
+        g_next.QuadPart = 0; // resync the cap
+        history = 0;
+        lastOff = now.QuadPart;
+    }
+    if (burstStart && !g_tableLoading && now.QuadPart - lastOff > g_freq.QuadPart * 2) {
+        Log("Speed fix: content load ran uncapped for %.1f s", (double)(lastOff - burstStart) / g_freq.QuadPart);
+        burstStart = 0;
+    }
+}
+
+static void IoLogFrame()
+{
+    static ULONGLONG lastBytes, lastOps, bytes, ops;
+    static LONGLONG start;
+    static int frames, readFrames;
+    IO_COUNTERS io;
+    if (!GetProcessIoCounters(GetCurrentProcess(), &io)) return;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    if (!start) { start = now.QuadPart; lastBytes = io.ReadTransferCount; lastOps = io.ReadOperationCount; return; }
+    const ULONGLONG db = io.ReadTransferCount - lastBytes;
+    if (db) ++readFrames;
+    bytes += db;
+    ops += io.ReadOperationCount - lastOps;
+    lastBytes = io.ReadTransferCount;
+    lastOps = io.ReadOperationCount;
+    ++frames;
+    if (now.QuadPart - start >= g_freq.QuadPart / 4) {
+        Log("io %.2f s: %llu bytes, %llu ops, %d frames (%d with reads)%s",
+            (double)(now.QuadPart - g_startQpc) / g_freq.QuadPart, bytes, ops, frames, readFrames,
+            g_loading ? " [startup]" : "");
+        start = now.QuadPart;
+        bytes = ops = 0;
+        frames = readFrames = 0;
+    }
+}
+
 static void LimitFrame()
 {
     static bool init = false;
     if (!init) { init = true; FirstFrameInit(); }
+    if (g_ioLog) IoLogFrame();
     if (g_loading) {
         UpdateStartupLoading();
         return;
     }
-    if (g_limitFps <= 0.0) return;
+    UpdateTableLoading();
+    if (g_limitFps <= 0.0 || g_tableLoading) return;
     const LONGLONG period = (LONGLONG)(g_freq.QuadPart / g_limitFps);
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);

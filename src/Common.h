@@ -13,7 +13,8 @@ struct GameBuild {
     const wchar_t* exe;
     bool dx11;
     DWORD timestamp;      // PE header TimeDateStamp of the supported build
-    DWORD frameTimer;     // DX11: RVA of the per-frame timer function
+    DWORD frameTimer;     // RVA of the per-frame timer function (push ebp; mov ebp,esp; sub esp,imm8)
+    BYTE frameTimerStack; // that imm8 (verified before hooking)
     DWORD setDisplayMode; // DX9: RVA of the set-display-mode function
     const char* windowClass;
     DWORD windowModeVar;  // DX9: RVA of the window-mode global (0 windowed, 1 fullscreen, 2 fullscreen window)
@@ -21,6 +22,12 @@ struct GameBuild {
     DWORD screenSizeVar;  // DX9: RVA of u16 width,height snapshot taken at window creation (menu background etc.)
     DWORD fullscreenKey;  // DX11: RVA of the "Fullscreen" settings-key string (read at one site only)
     DWORD presentSite;    // DX11: RVA of "push 1; push eax; call [ecx+20h]" (the Present call)
+    // Stuck initials overlay fix (see PinballFix.cpp)
+    DWORD curMenuVar;       // RVA of the current GUI menu id
+    DWORD enterInitialsVar; // RVA of the "table display says enter initials" flag
+    DWORD tablePtrVar;      // RVA of the current table object pointer
+    DWORD getMenus;         // RVA of the menu-manager singleton getter
+    DWORD menuBack;         // RVA of the menu manager's "back to previous menu" (thiscall)
 };
 
 // Display fix (Display.cpp)

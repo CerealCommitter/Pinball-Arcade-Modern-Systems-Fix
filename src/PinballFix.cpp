@@ -405,13 +405,17 @@ void* InstallDetour(BYTE* at, const void* to, const BYTE* expect, size_t len)
 // RVAs from the module's actual load address (the in-memory ImageBase field is
 // rewritten by the loader on relocation, so it can't be used to rebase VAs).
 static const GameBuild kBuilds[] = {
-    // DX11: frame timer at VA 0x49D7B0 (push ebp; mov ebp,esp; sub esp,14h)
-    // Present call site at VA 0x73DB19; "Fullscreen" key string at VA 0xAC1A94
-    {L"pinballarcade11.exe", true, 0x5F7DE4C5, 0x0009D7B0, 0, "GameWindowClass", 0, 0, 0, 0x006C1A94, 0x0033DB19},
-    // DX9: set-display-mode at VA 0x5BA5A0; window mode at VA 0xD072C8; UI tier at VA 0xB46430;
-    //      screen-size snapshot at VA 0xD41A10
-    {L"pinballarcade.exe", false, 0x5F7DE48A, 0, 0x001BA5A0, "Pinball Arcade", 0x009072C8, 0x00746430, 0x00941A10,
-     0, 0},
+    // DX11: frame timer at VA 0x49D7B0; Present call site at VA 0x73DB19; "Fullscreen" key
+    // string at VA 0xAC1A94. Overlay fix: menu id VA 0x16982C0, EnterInitials VA 0x110E0EC,
+    // table VA 0xF0A8FC, menus getter VA 0x419AC0, menu back VA 0x68F410.
+    {L"pinballarcade11.exe", true, 0x5F7DE4C5, 0x0009D7B0, 0x14, 0, "GameWindowClass", 0, 0, 0, 0x006C1A94,
+     0x0033DB19, 0x012982C0, 0x00D0E0EC, 0x00B0A8FC, 0x00019AC0, 0x0028F410},
+    // DX9: frame timer at VA 0x5BED70 (holds its own 60 fps busy-wait); set-display-mode at VA
+    // 0x5BA5A0; window mode at VA 0xD072C8; UI tier at VA 0xB46430; screen-size snapshot at VA
+    // 0xD41A10. Overlay fix: menu id VA 0x13BD8A8, EnterInitials VA 0xE45A6C, table VA
+    // 0xB463F8, menus getter VA 0x406C30, menu back VA 0x669530.
+    {L"pinballarcade.exe", false, 0x5F7DE48A, 0x001BED70, 0x18, 0x001BA5A0, "Pinball Arcade", 0x009072C8,
+     0x00746430, 0x00941A10, 0, 0, 0x00FBD8A8, 0x00A45A6C, 0x007463F8, 0x00006C30, 0x00269530},
 };
 
 // ---------------------------------------------------------------- stuck initials overlay
@@ -423,25 +427,18 @@ static const GameBuild kBuilds[] = {
 // 0x4C33BA). For the rest it is never closed. We do the same thing generically: if the
 // EnterName menu has been open for 0.5 s on a ROM-initials table while the game's
 // EnterInitials flag is clear, call the game's own "back to previous menu" (VA 0x68F410).
-namespace Dx11 {
-const DWORD kCurMenu = 0x012982C0;       // VA 0x16982C0: current GUI menu id
-const DWORD kEnterInitials = 0x00D0E0EC; // VA 0x110E0EC: table display says "enter initials"
-const DWORD kTablePtr = 0x00B0A8FC;      // VA 0xF0A8FC: current table object
-const DWORD kRomInitials = 0x310FC;      // table field: initials entered through the ROM
-const DWORD kGetMenus = 0x00019AC0;      // VA 0x419AC0: menu manager singleton
-const DWORD kMenuBack = 0x0028F410;      // VA 0x68F410: menu manager "back" (thiscall)
+const DWORD kRomInitials = 0x310FC; // table field: initials are entered through the ROM
 const int kEnterNameMenu = 0x23;
-}
 
 static void FixStuckInitialsOverlay()
 {
-    if (!g_build || !g_build->dx11) return;
+    if (!g_build || !g_build->curMenuVar) return;
     BYTE* exe = (BYTE*)g_exe;
     static int stuckFrames;
-    const int menu = *(int*)(exe + Dx11::kCurMenu);
-    BYTE* table = *(BYTE**)(exe + Dx11::kTablePtr);
-    const bool stuck = menu == Dx11::kEnterNameMenu && table && *(int*)(table + Dx11::kRomInitials) &&
-                       *(int*)(exe + Dx11::kEnterInitials) == 0;
+    const int menu = *(int*)(exe + g_build->curMenuVar);
+    BYTE* table = *(BYTE**)(exe + g_build->tablePtrVar);
+    const bool stuck = menu == kEnterNameMenu && table && *(int*)(table + kRomInitials) &&
+                       *(int*)(exe + g_build->enterInitialsVar) == 0;
     if (!stuck) {
         stuckFrames = 0;
         return;
@@ -450,9 +447,9 @@ static void FixStuckInitialsOverlay()
     stuckFrames = 0;
     typedef void*(__cdecl * GetMenus_t)();
     typedef void(__thiscall * MenuBack_t)(void*);
-    void* menus = ((GetMenus_t)(exe + Dx11::kGetMenus))();
+    void* menus = ((GetMenus_t)(exe + g_build->getMenus))();
     if (!menus) return;
-    ((MenuBack_t)(exe + Dx11::kMenuBack))(menus);
+    ((MenuBack_t)(exe + g_build->menuBack))(menus);
     Log("Game fix: closed the initials overlay left open after high-score entry");
 }
 
@@ -461,22 +458,28 @@ static FrameTimer_t g_origFrameTimer;
 
 static void __cdecl FrameTimerHook()
 {
-    LimitFrame();
-    FrameStats();
+    if (g_build->dx11) {
+        LimitFrame();
+        FrameStats();
+    }
     FixStuckInitialsOverlay();
     g_origFrameTimer();
 }
 
-static void InstallSpeedFix(HMODULE exe, const GameBuild& b)
+// Per-frame hook in the game's own frame timer: the DX11 frame cap plus game fixes (both builds).
+static void InstallFrameHook(HMODULE exe, const GameBuild& b)
 {
-    g_exe = exe;
-    g_build = &b;
-    Log(InstallPresentHook() ? "Speed fix: Present hooked" : "Speed fix: Present bytes did not match, not hooked");
-    static const BYTE prologue[] = {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14};
+    if (b.dx11)
+        Log(InstallPresentHook() ? "Speed fix: Present hooked" : "Speed fix: Present bytes did not match, not hooked");
+    const BYTE prologue[] = {0x55, 0x8B, 0xEC, 0x83, 0xEC, b.frameTimerStack};
     g_origFrameTimer = (FrameTimer_t)InstallDetour((BYTE*)exe + b.frameTimer, (void*)FrameTimerHook, prologue,
                                                    sizeof(prologue));
-    Log(g_origFrameTimer ? "Speed fix: DX11 frame timer hooked"
-                         : "Speed fix: frame timer bytes did not match, not patching");
+    if (!g_origFrameTimer)
+        Log("Frame hook: frame timer bytes did not match, not hooked (speed and overlay fixes inactive)");
+    else if (b.dx11)
+        Log("Speed fix: DX11 frame timer hooked");
+    else
+        Log("Frame hook: DX9 frame timer hooked (game fixes only; DX9 already caps at 60 fps)");
 }
 
 // ---------------------------------------------------------------- entry
@@ -505,10 +508,9 @@ static void Init()
             Log("Unknown %ls build (timestamp %08X), not patching", exeName, nt->FileHeader.TimeDateStamp);
             return;
         }
-        if (b.dx11)
-            InstallSpeedFix(exe, b);
-        else
-            Log("Speed fix: not needed (DX9 build has its own 60 fps cap)");
+        g_exe = exe;
+        g_build = &b;
+        InstallFrameHook(exe, b);
         InstallDisplayFix(exe, b);
         InstallLauncher(exe);
         return;

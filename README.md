@@ -141,18 +141,16 @@ All addresses below are in the supported build.
   background is drawn as a square 1.2x the screen's larger side, from a size saved at window
   creation, `0xD41A10`; left at 640x480 it was a 768x768 box).
 - The process is marked per-monitor DPI aware, so Windows display scaling can't blur it.
+- Because the fix adds its own black backdrop window, it makes sure the game window, not the
+  backdrop, has focus when it first appears (the DX11 title screen only runs while its window is
+  active). This guards against a side effect of the fix's own windows; it isn't an
+  original-game bug.
 - In our unpatched DX11 native fullscreen test, a 2560x1440 picture was stretched across the
   5120x1440 display. This display problem is separate from the speed problem reproduced in
   legacy windowed mode. The fix ignores the old tool's DX11 "Fullscreen" setting and blocks
   Alt+Enter, using its own borderless window instead. At the default 16:9 setting on this
   display, the patched game renders a centred 2560x1440 picture with black side bars;
   it does not render a 5120x1440 ultrawide game view.
-
-### Start-up focus
-The DX11 game only runs its title screen once Windows tells it its window is active. When Steam
-starts the game, Windows can refuse to bring a new window to the front, and the fix's own black
-backdrop window could take focus first. As a safeguard, the fix makes sure the game window takes
-focus when it first appears.
 
 ### Settings tool
 `PBAConfig.exe` (the Launch Configuration Utility) shows number fields for arcade-cabinet screen

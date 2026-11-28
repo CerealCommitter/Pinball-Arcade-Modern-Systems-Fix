@@ -297,8 +297,8 @@ bool RunLauncher()
         // both
         {L"Language", {L"Game default", L"English", L"French", L"Italian", L"German", L"Spanish"},
          Clamp(g.language + 1, 0, 5)},
-        {L"When the game is in the background", {L"Ignore keyboard and controller", L"Keep reading input"},
-         g.ignoreInput ? 0 : 1},
+        // named and ordered as in the old tool (settings.dat value = list index)
+        {L"Focus-sensitive Input", {L"Off (Use Input)", L"On (Ignore Input)"}, g.ignoreInput ? 1 : 0},
     };
     for (int i = cAa11; i <= cBright11; ++i) {
         spec.choices[i].showWhenChoice = cRenderer;
@@ -333,7 +333,7 @@ bool RunLauncher()
     g.postProcessing = sel(cPost9);
     g.ballReflection = sel(cReflect9);
     g.language = sel(cLang) - 1;
-    g.ignoreInput = sel(cInput) == 0 ? 1 : 0;
+    g.ignoreInput = sel(cInput);
     g.SetDx11("MSAAS", kAaDx11[sel(cAa11)]);
     g.SetDx11("MSAAQ", sel(cMsaaQ11) * 10);
     g.SetDx11("ANISO", kAnisoDx11[sel(cAniso11)]);

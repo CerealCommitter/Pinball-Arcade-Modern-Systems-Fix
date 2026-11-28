@@ -61,8 +61,8 @@ Opens when the game starts, before the game loads its settings, whichever versio
     **Anisotropic filtering** (off to 16x), **Ball brightening**.
   - DirectX 9: **Anti-aliasing** (off to 16x), **Texture filtering** (none, bilinear,
     anisotropic 4x to 16x), **Post-processing**, **Ball reflection**.
-- **Language** and **When the game is in the background** (ignore or keep reading keyboard and
-  controller input), for both renderers.
+- **Language** and **Focus-sensitive Input** (whether the game ignores input while it isn't the
+  active window), for both renderers.
 
 All of these are written to the game's own settings files in the same format the old tool used.
 The old tool's resolution and window-mode settings are replaced by **Display**, and its Cabinet

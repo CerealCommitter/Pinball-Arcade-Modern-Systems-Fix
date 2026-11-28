@@ -96,13 +96,19 @@ work, that log shows what happened.
 every controller call through to the real Windows `xinput1_3.dll` and patches the game in memory.
 All addresses below are in the supported build.
 
-### Game speed and pacing (DX11)
+### Game speed in legacy windowed mode (DX11)
 - `PinballArcade11.exe` advances the simulation by a fixed 16 ms for every frame it draws
-  (frame timer at `0x49D7B0`), with `Present(1)` at `0x73DB19`. The speed problem depends on
-  the actual frame rate: rendering at about 120 fps instead of 60 fps makes the simulation
-  run about twice as fast. Desktop refresh rate alone does not prove that frame rate, and
-  the original windowed and fullscreen paths can behave differently. The DX9 build has its
-  own 60 fps busy-wait.
+  (frame timer at `0x49D7B0`), so it runs fast whenever it renders above 60 fps: about
+  120 fps means about twice the intended speed.
+- In its original **windowed** mode nothing caps that frame rate: the game presents with
+  `Present(1)` (`0x73DB19`), once per monitor refresh, so on a 120 Hz desktop it renders at
+  about 120 fps. Its present function (`0x73DA80`) does contain a frame limiter, a minimum of
+  15 ms between frames (about 66 fps), but it only runs while the renderer's fullscreen flag is
+  set (the flag the game's Alt+Enter toggle switches); in windowed mode that flag is off. If
+  native fullscreen sets the same flag, that would explain why it looked normal-speed. This
+  comes from reading the code and hasn't been confirmed by measuring fullscreen FPS. Desktop
+  refresh rate alone doesn't prove the frame rate.
+- The DX9 build has its own 60 fps busy-wait and doesn't have this problem.
 - Confirmed reproduction: unpatched DX11 in legacy windowed mode on a 120 Hz desktop,
   with Terminator 2 appearing too fast. Native fullscreen appeared normal-speed in a separate
   test; its FPS was not measured, so we do not claim a fullscreen speed reproduction or

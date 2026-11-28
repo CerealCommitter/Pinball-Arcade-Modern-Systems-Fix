@@ -183,6 +183,10 @@ Tested on Windows 11 with a 5120x1440 120 Hz monitor:
   checked against the running game, but hasn't been seen closing a stuck box yet.
 
 ## Limitations
+- **Cabinet mode is not supported.** The fix is for the regular PC version only, not
+  `PinballArcadeCabinet.exe` or multi-screen arcade-cabinet setups (separate playfield, backglass
+  and DMD screens). It does nothing in the cabinet exe, and the settings window has no Cabinet
+  settings.
 - Steam still lists the old Launch Configuration Utility. Removing it would mean changing the
   game's files; ticking Steam's "remember my choice" hides it.
 - The fix uses the primary monitor, and reads the desktop resolution when the game starts.

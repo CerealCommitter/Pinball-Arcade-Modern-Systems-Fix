@@ -13,6 +13,10 @@ struct LauncherChoice {
     std::wstring label;               // e.g. "Resolution"
     std::vector<std::wstring> items;  // drop-down entries
     int selected = 0;                 // in/out
+    // Optional: only show this choice while choices[showWhenChoice].selected == showWhenValue
+    // (e.g. renderer-specific settings). -1 = always shown.
+    int showWhenChoice = -1;
+    int showWhenValue = 0;
 };
 
 struct LauncherSpec {

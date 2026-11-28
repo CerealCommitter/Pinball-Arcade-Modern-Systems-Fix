@@ -69,6 +69,7 @@ struct UI {
     HBRUSH menuBrush = nullptr;
 
     std::vector<HWND> selects;
+    std::vector<int> rowOf;  // layout row of each choice, -1 while hidden
     HWND check = nullptr, play = nullptr, quit = nullptr;
     int checkY = 0, hintY = 0, btnY = 0, height = 0;
 
@@ -91,6 +92,37 @@ void RoundRect(GraphicsPath& p, REAL x, REAL y, REAL w, REAL h, REAL r) {
     p.AddArc(x + w - d, y + h - d, d, d, 0, 90);
     p.AddArc(x, y + h - d, d, d, 90, 90);
     p.CloseFigure();
+}
+
+bool Visible(const LauncherSpec& spec, size_t i) {
+    const LauncherChoice& c = spec.choices[i];
+    if (c.showWhenChoice < 0 || c.showWhenChoice >= (int)spec.choices.size()) return true;
+    return spec.choices[c.showWhenChoice].selected == c.showWhenValue;
+}
+
+// Number of visible choices with the current selections.
+int CountVisible(const LauncherSpec& spec) {
+    int n = 0;
+    for (size_t i = 0; i < spec.choices.size(); ++i) n += Visible(spec, i) ? 1 : 0;
+    return n;
+}
+
+// Most rows any setting of a controlling choice can show (the window is sized for that).
+int MaxRows(LauncherSpec& spec) {
+    int best = CountVisible(spec);
+    for (size_t k = 0; k < spec.choices.size(); ++k) {
+        bool controls = false;
+        for (auto& c : spec.choices) controls |= c.showWhenChoice == (int)k;
+        if (!controls) continue;
+        const int keep = spec.choices[k].selected;
+        for (int v = 0; v < (int)spec.choices[k].items.size(); ++v) {
+            spec.choices[k].selected = v;
+            const int n = CountVisible(spec);
+            if (n > best) best = n;
+        }
+        spec.choices[k].selected = keep;
+    }
+    return best;
 }
 
 void Text(HDC dc, HFONT f, COLORREF c, const std::wstring& s, RECT r, UINT flags) {
@@ -182,7 +214,8 @@ void PaintWindow(UI& ui, HDC dc, const RECT& rc) {
     Text(dc, ui.fSub, kSubText, ui.spec->subtitle, RECT{x, ui.S(kSubY), x + w, ui.S(kSubY + 20)},
          DT_LEFT | DT_SINGLELINE);
     for (size_t i = 0; i < ui.spec->choices.size(); ++i) {
-        const int y = ui.S(kChoicesY + (int)i * kChoiceStep);
+        if (i >= ui.rowOf.size() || ui.rowOf[i] < 0) continue;
+        const int y = ui.S(kChoicesY + ui.rowOf[i] * kChoiceStep);
         Text(dc, ui.fLabel, kLabel, ui.spec->choices[i].label, RECT{x, y, x + w, y + ui.S(20)},
              DT_LEFT | DT_SINGLELINE);
     }
@@ -323,6 +356,26 @@ void DrawMenuItem(UI& ui, const DRAWITEMSTRUCT& d) {
              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
+// Places the visible drop-downs in consecutive rows and hides the rest.
+void Relayout(UI& ui) {
+    const int x = ui.S(kLeft), w = ui.S(kContentW);
+    ui.rowOf.assign(ui.spec->choices.size(), -1);
+    int row = 0;
+    for (size_t i = 0; i < ui.spec->choices.size(); ++i) {
+        if (!Visible(*ui.spec, i)) {
+            if (i < ui.selects.size()) ShowWindow(ui.selects[i], SW_HIDE);
+            continue;
+        }
+        ui.rowOf[i] = row;
+        if (i < ui.selects.size()) {
+            SetWindowPos(ui.selects[i], nullptr, x, ui.S(kChoicesY + row * kChoiceStep + 22), w,
+                         ui.S(kFieldH), SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
+        ++row;
+    }
+    if (ui.hwnd) InvalidateRect(ui.hwnd, nullptr, FALSE);
+}
+
 void OpenMenu(UI& ui, int index) {
     LauncherChoice& c = ui.spec->choices[index];
     HMENU m = CreatePopupMenu();
@@ -344,6 +397,7 @@ void OpenMenu(UI& ui, int index) {
     ui.menuFor = -1;
     if (cmd >= IdMenu0 && cmd < IdMenu0 + (int)c.items.size()) c.selected = cmd - IdMenu0;
     InvalidateRect(ui.selects[index], nullptr, FALSE);
+    Relayout(ui);  // another choice may depend on this one
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -460,7 +514,7 @@ bool ShowLauncher(HMODULE resModule, LauncherSpec& spec) {
     // Vertical layout depends on how many choices there are and how the hint wraps.
     {
         HDC dc = GetDC(nullptr);
-        const int n = (int)spec.choices.size();
+        const int n = MaxRows(spec);
         ui.checkY = ui.S(kChoicesY + n * kChoiceStep + 2);
         ui.hintY = ui.checkY + ui.S(24);
         const int hintH = TextHeight(dc, ui.fHint, spec.hintText, ui.S(kContentW - 26));
@@ -508,11 +562,9 @@ bool ShowLauncher(HMODULE resModule, LauncherSpec& spec) {
         }
 
         const int x = ui.S(kLeft), w = ui.S(kContentW);
-        for (size_t i = 0; i < spec.choices.size(); ++i) {
-            const int y = ui.S(kChoicesY + (int)i * kChoiceStep + 22);
-            ui.selects.push_back(
-                MakeButton(ui, IdSelect0 + (int)i, L"", x, y, w, ui.S(kFieldH)));
-        }
+        for (size_t i = 0; i < spec.choices.size(); ++i)
+            ui.selects.push_back(MakeButton(ui, IdSelect0 + (int)i, L"", x, 0, w, ui.S(kFieldH)));
+        Relayout(ui);
         ui.check = MakeButton(ui, IdCheck, L"", x, ui.checkY, w, ui.S(22));
         ui.quit = MakeButton(ui, IdQuit, L"Quit",
                              x + w - ui.S(kBtnW) * 2 - ui.S(kBtnGap), ui.btnY, ui.S(kBtnW),

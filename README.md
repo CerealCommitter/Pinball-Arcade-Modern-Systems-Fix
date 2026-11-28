@@ -55,11 +55,19 @@ Opens when the game starts, before the game loads its settings, whichever versio
 - **Display**: *Fullscreen 16:9 with black bars* or *Windowed 16:9* (a normal window at 75% of
   the fullscreen size, 1920x1080 on a 2560x1440 or 5120x1440 screen, centred; it can be moved
   and minimised but not resized).
-- **Anti-aliasing**, **Texture filtering**, **Post-processing (DX9)**, **Ball reflection (DX9)**,
-  **Ball brightening (DX11)**, **Language**, and **When the game is in the background** (ignore
-  or keep reading keyboard and controller input): the game's own graphics and input settings,
-  which the old settings tool used to set. They are written to the game's settings files in the
-  same format the old tool used.
+- **Graphics settings for the selected renderer**, with the same choices the old settings tool
+  had on its DX11 and DX9 tabs. The list changes when you switch Renderer:
+  - DirectX 11: **Anti-aliasing (MSAA)** (off, 4x, 8x), **MSAA quality** (0-100),
+    **Anisotropic filtering** (off to 16x), **Ball brightening**.
+  - DirectX 9: **Anti-aliasing** (off to 16x), **Texture filtering** (none, bilinear,
+    anisotropic 4x to 16x), **Post-processing**, **Ball reflection**.
+- **Language** and **When the game is in the background** (ignore or keep reading keyboard and
+  controller input), for both renderers.
+
+All of these are written to the game's own settings files in the same format the old tool used.
+The old tool's resolution and window-mode settings are replaced by **Display**, and its Cabinet
+tab (screen layouts for multi-screen arcade cabinets) is left out because the cabinet version
+isn't supported.
 - **Show this window every time the game starts**: untick to start straight away with your
   saved settings. Hold **Shift** while the game starts to bring the window back.
 - **Play** starts the game; **Quit** cancels the launch.

@@ -157,11 +157,13 @@ bool SaveGameSettings(const std::wstring& folder, const GameSettings& g)
 }
 
 // ---------------------------------------------------------------- choices
-// Each launcher choice maps onto one or both game settings files.
-const int kAaDx9[] = {0, 2, 3};        // settings.dat AntiAliasing index: None, 4X, 8X
-const int kAaDx11[] = {1, 4, 8};       // dx11 MSAAS samples
-const int kTexDx9[] = {1, 2, 3, 4};    // settings.dat TextureFilter: Linear, Aniso x4/x8/x16
-const int kTexDx11[] = {1, 4, 8, 16};  // dx11 ANISO
+// The same values the old configuration utility offered for each setting. DX9 settings live in
+// settings.dat (as list indexes), DX11 settings in dx11_settings.dat (as values).
+const int kAaDx11[] = {1, 4, 8};          // MSAAS samples
+const int kAnisoDx11[] = {1, 2, 4, 8, 16}; // ANISO
+// settings.dat AntiAliasing: None, 2X, 4X, 8X, 12X, 16X (index 0-5)
+// settings.dat TextureFilter: None, Linear, Aniso x4, x8, x16 (index 0-4)
+// dx11 MSAAQ: 0-100 in steps of 10
 
 template <size_t N>
 int IndexOf(const int (&table)[N], long long value, int fallback)
@@ -264,7 +266,14 @@ bool RunLauncher()
     const bool windowed = _wcsicmp(mode, L"Windowed") == 0 || _wcsicmp(mode, L"Window") == 0 ||
                           _wcsicmp(mode, L"Off") == 0 || _wcsicmp(mode, L"Original") == 0;
 
-    enum { cRenderer, cDisplay, cAA, cTex, cPost, cReflect, cBright, cLang, cInput };
+    // Renderer-specific settings only show while that renderer is selected (as the old tool had
+    // separate DX9 and DX11 tabs).
+    enum {
+        cRenderer, cDisplay,
+        cAa11, cMsaaQ11, cAniso11, cBright11,
+        cAa9, cTex9, cPost9, cReflect9,
+        cLang, cInput
+    };
     LauncherSpec spec;
     spec.windowTitle = L"Pinball Arcade - Modern Systems Fix";
     spec.gameTitle = L"Pinball Arcade";
@@ -272,18 +281,33 @@ bool RunLauncher()
     spec.choices = {
         {L"Renderer", {L"DirectX 11 (recommended)", L"DirectX 9"}, wantDx11 ? 0 : 1},
         {L"Display", {L"Fullscreen 16:9 with black bars", L"Windowed 16:9"}, windowed ? 1 : 0},
-        {L"Anti-aliasing", {L"Off", L"4x", L"8x"},
-         IndexOf(kAaDx11, g.Dx11("MSAAS", kAaDx11[IndexOf(kAaDx9, g.antiAliasing, 0)]), 0)},
-        {L"Texture filtering", {L"Bilinear", L"Anisotropic 4x", L"Anisotropic 8x", L"Anisotropic 16x"},
-         IndexOf(kTexDx11, g.Dx11("ANISO", kTexDx11[IndexOf(kTexDx9, g.textureFilter, 3)]), 3)},
-        {L"Post-processing (DX9)", {L"Off", L"On"}, Clamp(g.postProcessing, 0, 1)},
-        {L"Ball reflection (DX9)", {L"Off", L"Low", L"High"}, Clamp(g.ballReflection, 0, 2)},
-        {L"Ball brightening (DX11)", {L"Off", L"On"}, (int)Clamp((int)g.Dx11("BallBrighten", 0), 0, 1)},
+        // DX11
+        {L"Anti-aliasing (MSAA)", {L"Off", L"4x", L"8x"}, IndexOf(kAaDx11, g.Dx11("MSAAS", 1), 0)},
+        {L"MSAA quality", {L"0", L"10", L"20", L"30", L"40", L"50", L"60", L"70", L"80", L"90", L"100"},
+         Clamp((int)(g.Dx11("MSAAQ", 0) / 10), 0, 10)},
+        {L"Anisotropic filtering", {L"Off", L"2x", L"4x", L"8x", L"16x"},
+         IndexOf(kAnisoDx11, g.Dx11("ANISO", 16), 4)},
+        {L"Ball brightening", {L"Off", L"On"}, Clamp((int)g.Dx11("BallBrighten", 0), 0, 1)},
+        // DX9
+        {L"Anti-aliasing", {L"Off", L"2x", L"4x", L"8x", L"12x", L"16x"}, Clamp(g.antiAliasing, 0, 5)},
+        {L"Texture filtering", {L"None", L"Bilinear", L"Anisotropic 4x", L"Anisotropic 8x", L"Anisotropic 16x"},
+         Clamp(g.textureFilter, 0, 4)},
+        {L"Post-processing", {L"Off", L"On"}, Clamp(g.postProcessing, 0, 1)},
+        {L"Ball reflection", {L"Off", L"Low", L"High"}, Clamp(g.ballReflection, 0, 2)},
+        // both
         {L"Language", {L"Game default", L"English", L"French", L"Italian", L"German", L"Spanish"},
          Clamp(g.language + 1, 0, 5)},
         {L"When the game is in the background", {L"Ignore keyboard and controller", L"Keep reading input"},
          g.ignoreInput ? 0 : 1},
     };
+    for (int i = cAa11; i <= cBright11; ++i) {
+        spec.choices[i].showWhenChoice = cRenderer;
+        spec.choices[i].showWhenValue = 0;
+    }
+    for (int i = cAa9; i <= cReflect9; ++i) {
+        spec.choices[i].showWhenChoice = cRenderer;
+        spec.choices[i].showWhenValue = 1;
+    }
     spec.checkboxText = L"Show this window every time the game starts";
     spec.hintText = L"If you turn this off, hold Shift while the game starts to bring it back.";
     spec.checked = showAtLaunch;
@@ -302,17 +326,18 @@ bool RunLauncher()
     WritePrivateProfileStringW(L"Display", L"Mode", displayMode, ini);
     WritePrivateProfileStringW(L"Launcher", L"ShowAtLaunch", spec.checked ? L"1" : L"0", ini);
 
+    // both renderers' settings are written (the hidden ones keep the values they were loaded with)
     g.version = 4;
-    g.postProcessing = sel(cPost);
-    g.antiAliasing = kAaDx9[sel(cAA)];
-    g.ballReflection = sel(cReflect);
+    g.antiAliasing = sel(cAa9);
+    g.textureFilter = sel(cTex9);
+    g.postProcessing = sel(cPost9);
+    g.ballReflection = sel(cReflect9);
     g.language = sel(cLang) - 1;
     g.ignoreInput = sel(cInput) == 0 ? 1 : 0;
-    g.textureFilter = kTexDx9[sel(cTex)];
-    g.SetDx11("MSAAS", kAaDx11[sel(cAA)]);
-    g.SetDx11("MSAAQ", g.Dx11("MSAAQ", 0));
-    g.SetDx11("ANISO", kTexDx11[sel(cTex)]);
-    g.SetDx11("BallBrighten", sel(cBright));
+    g.SetDx11("MSAAS", kAaDx11[sel(cAa11)]);
+    g.SetDx11("MSAAQ", sel(cMsaaQ11) * 10);
+    g.SetDx11("ANISO", kAnisoDx11[sel(cAniso11)]);
+    g.SetDx11("BallBrighten", sel(cBright11));
     g.SetDx11("MultiScreen", g.Dx11("MultiScreen", 0));
     int w, h;
     if (DisplayRenderSize(displayMode, w, h)) {
@@ -327,10 +352,11 @@ bool RunLauncher()
         g.SetDx11("BackBufferH", h);
     }
     const bool ok = SaveGameSettings(folder, g);
-    Log("Launcher: Play; settings %s (AA %d, texture filter %d, post %d, reflection %d, brighten %d, "
-        "language %d, ignore input %d, display %s)",
-        ok ? "saved" : "could NOT be saved", g.antiAliasing, g.textureFilter, g.postProcessing,
-        g.ballReflection, sel(cBright), g.language, g.ignoreInput, sel(cDisplay) == 0 ? "fullscreen" : "windowed");
+    Log("Launcher: Play; settings %s. DX11: MSAA %d, quality %d, aniso %d, brighten %d. DX9: AA %d, "
+        "texture filter %d, post %d, reflection %d. Language %d, ignore input %d, display %s",
+        ok ? "saved" : "could NOT be saved", kAaDx11[sel(cAa11)], sel(cMsaaQ11) * 10,
+        kAnisoDx11[sel(cAniso11)], sel(cBright11), g.antiAliasing, g.textureFilter, g.postProcessing,
+        g.ballReflection, g.language, g.ignoreInput, sel(cDisplay) == 0 ? "fullscreen" : "windowed");
 
     const bool chooseDx11 = sel(cRenderer) == 0;
     WritePrivateProfileStringW(L"Launcher", L"Renderer", chooseDx11 ? L"DX11" : L"DX9", ini);

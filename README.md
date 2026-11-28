@@ -21,8 +21,6 @@ game back exactly as it was.
   with Windows display scaling.
 - **Broken settings tool.** The Launch Configuration Utility crashes on a fresh install. It is
   replaced by a settings window built into the fix, which opens when the game starts.
-- **Small menu background (DX9).** The moving blueprint background in the menus was a small box
-  in the corner instead of filling the screen.
 - **Stuck high-score box.** An original game bug: after entering initials on some tables
   (reproduced on Teed Off), the on-screen letter-select box stayed up into the next game and took
   over the flipper keys until the table was reloaded. The fix closes it.
@@ -139,10 +137,9 @@ All addresses below are in the supported build.
   largest 16:9 size that fits the monitor, with a black full-screen window behind it for the
   bars, or a normal centred window. The game renders at the window's size. For DX9 it also hooks
   the set-display-mode function (`0x5BA5A0`) to use that size, keeps the game out of exclusive
-  fullscreen, pins `MoveWindow`, and updates the screen size the menus use (the moving menu
-  background is drawn as a square 1.2x the screen's larger side, from a size saved at window
-  creation, `0xD41A10`; left at 640x480 it was a 768x768 box).
-- The process is marked per-monitor DPI aware, so Windows display scaling can't blur it.- In our unpatched DX11 native fullscreen test, a 2560x1440 picture was stretched across the
+  fullscreen, pins `MoveWindow`, and updates the screen size the menus are laid out for.
+- The process is marked per-monitor DPI aware, so Windows display scaling can't blur it.
+- In our unpatched DX11 native fullscreen test, a 2560x1440 picture was stretched across the
   5120x1440 display. This display problem is separate from the speed problem reproduced in
   legacy windowed mode. The fix ignores the old tool's DX11 "Fullscreen" setting and blocks
   Alt+Enter, using its own borderless window instead. At the default 16:9 setting on this

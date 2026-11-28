@@ -8,7 +8,7 @@
 //
 // On Play we write the same files PBAConfig wrote, in the same formats, so the game picks the
 // settings up unchanged:
-//   settings.dat       11 little-endian int32s: version, post-processing, window mode, width,
+//   settings.dat       11 little-endian int32s: version (6), post-processing, window mode, width,
 //                      height, anti-aliasing, ball reflection, language (-1 = default),
 //                      monitor, ignore input when unfocused, texture filter. (Read by both
 //                      builds.)
@@ -30,7 +30,7 @@ namespace {
 // ---------------------------------------------------------------- game settings files
 struct GameSettings {
     // settings.dat
-    int version = 4, postProcessing = 0, windowMode = 0, width = 640, height = 480;
+    int version = 6, postProcessing = 0, windowMode = 0, width = 640, height = 480;
     int antiAliasing = 0, ballReflection = 1, language = -1, monitor = 0, ignoreInput = 1,
         textureFilter = 0;
     // dx11_settings.dat (ordered records, kept as found plus our keys)
@@ -327,7 +327,7 @@ bool RunLauncher()
     WritePrivateProfileStringW(L"Launcher", L"ShowAtLaunch", spec.checked ? L"1" : L"0", ini);
 
     // both renderers' settings are written (the hidden ones keep the values they were loaded with)
-    g.version = 4;
+    g.version = 6; // as PBAConfig writes; the DX9 game only reads the texture filter from version 6 on
     g.antiAliasing = sel(cAa9);
     g.textureFilter = sel(cTex9);
     g.postProcessing = sel(cPost9);

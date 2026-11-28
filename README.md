@@ -140,12 +140,7 @@ All addresses below are in the supported build.
   fullscreen, pins `MoveWindow`, and updates the screen size the menus use (the moving menu
   background is drawn as a square 1.2x the screen's larger side, from a size saved at window
   creation, `0xD41A10`; left at 640x480 it was a 768x768 box).
-- The process is marked per-monitor DPI aware, so Windows display scaling can't blur it.
-- Because the fix adds its own black backdrop window, it makes sure the game window, not the
-  backdrop, has focus when it first appears (the DX11 title screen only runs while its window is
-  active). This guards against a side effect of the fix's own windows; it isn't an
-  original-game bug.
-- In our unpatched DX11 native fullscreen test, a 2560x1440 picture was stretched across the
+- The process is marked per-monitor DPI aware, so Windows display scaling can't blur it.- In our unpatched DX11 native fullscreen test, a 2560x1440 picture was stretched across the
   5120x1440 display. This display problem is separate from the speed problem reproduced in
   legacy windowed mode. The fix ignores the old tool's DX11 "Fullscreen" setting and blocks
   Alt+Enter, using its own borderless window instead. At the default 16:9 setting on this

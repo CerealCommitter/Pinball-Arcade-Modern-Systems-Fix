@@ -7,8 +7,11 @@ game back exactly as it was.
 ![A table in 16:9 with black bars on a 32:9 monitor](screenshots/table-fullscreen-32x9.jpg)
 
 ## What it fixes
-- **Game speed (DX11).** The ball moved far too fast on high-refresh monitors: 2x speed at
-  120 Hz, 4x at 240 Hz. The game is held to the 60 fps its physics were made for.
+- **Game speed in legacy windowed mode (DX11).** On a 120 Hz desktop, the unpatched game
+  ran at a measured 119.84 fps in its original windowed mode and gameplay appeared too fast.
+  The fix holds gameplay to the 60 fps its physics were made for. The speed problem was not
+  reproduced in our native fullscreen test, where gameplay appeared normal-speed; fullscreen
+  FPS was not measured. A monitor's refresh rate alone does not establish the game's speed.
 - **Screen resolution.** The game opened in a small window in the corner of the screen that
   couldn't be moved, and its settings tool didn't list modern resolutions. It now runs
   fullscreen on any monitor with the picture kept 16:9 and black bars at the sides (or top and
@@ -91,9 +94,15 @@ All addresses below are in the supported build.
 
 ### Game speed and pacing (DX11)
 - `PinballArcade11.exe` advances the simulation by a fixed 16 ms for every frame it draws
-  (frame timer at `0x49D7B0`) and has no frame cap; it presents every monitor refresh
-  (`Present(1)` at `0x73DB19`). On a 60 Hz monitor that was real time; at 120 Hz it is double
-  speed. The DX9 build has its own 60 fps busy-wait and was fine.
+  (frame timer at `0x49D7B0`), with `Present(1)` at `0x73DB19`. The speed problem depends on
+  the actual frame rate: rendering at about 120 fps instead of 60 fps makes the simulation
+  run about twice as fast. Desktop refresh rate alone does not prove that frame rate, and
+  the original windowed and fullscreen paths can behave differently. The DX9 build has its
+  own 60 fps busy-wait.
+- Confirmed reproduction: unpatched DX11 in legacy windowed mode on a 120 Hz desktop,
+  with Terminator 2 appearing too fast. Native fullscreen appeared normal-speed in a separate
+  test; its FPS was not measured, so we do not claim a fullscreen speed reproduction or
+  that every fullscreen configuration is immune.
 - The fix hooks the frame timer and holds each frame to 1/60 s with a high-resolution timer, and
   takes over the `Present` call to limit DXGI's frame queue to one frame, which keeps input lag
   low. Measured: a steady 16.67 ms per frame.
@@ -119,9 +128,12 @@ All addresses below are in the supported build.
   background is drawn as a square 1.2x the screen's larger side, from a size saved at window
   creation, `0xD41A10`; left at 640x480 it was a 768x768 box).
 - The process is marked per-monitor DPI aware, so Windows display scaling can't blur it.
-- The old tool's DX11 "Fullscreen" setting switches the game to a path that draws a fixed-size
-  picture into the corner of the window; the fix makes the game ignore that setting, and blocks
-  Alt+Enter, the game's own toggle into it.
+- In our unpatched DX11 native fullscreen test, a 2560x1440 picture was stretched across the
+  5120x1440 display. This display problem is separate from the speed problem reproduced in
+  legacy windowed mode. The fix ignores the old tool's DX11 "Fullscreen" setting and blocks
+  Alt+Enter, using its own borderless window instead. At the default 16:9 setting on this
+  display, the patched game renders a centred 2560x1440 picture with black side bars;
+  it does not render a 5120x1440 ultrawide game view.
 
 ### Start-up focus
 The DX11 game only runs its title screen once Windows tells it its window is active. When Steam
@@ -145,7 +157,13 @@ tables such as Cactus Jack's and Black Knight 2000.
 ## Verified
 Tested on Windows 11 with a 5120x1440 120 Hz monitor:
 
-- DX11 speed: steady 60 fps (16.67 ms frames), play-tested.
+- Unpatched DX11 legacy windowed mode, Terminator 2 (2026-11-27): PresentMon 2.6.0 measured
+  1,436 frames over 11.974 seconds, averaging 119.84 fps / 8.34 ms per frame, with no dropped
+  frames. Gameplay appeared too fast during the test. This measures frame rate; simulation
+  speed was assessed by playing, not by a separate timing measurement.
+- Unpatched DX11 native fullscreen: gameplay appeared normal-speed, with a 2560x1440 picture
+  stretched across the 5120x1440 display. FPS was not measured in this test.
+- Patched DX11 speed: steady 60 fps (16.67 ms frames), play-tested.
 - Fullscreen and windowed, DX9 and DX11: correct 16:9 picture at native resolution (2560x1440
   fullscreen, 1920x1080 windowed), menus and tables play-tested.
 - DX11 title screen accepts the first click or key about 1 second after it appears; tables load

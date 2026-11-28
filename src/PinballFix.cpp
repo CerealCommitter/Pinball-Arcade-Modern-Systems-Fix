@@ -4,9 +4,11 @@
 // Game speed:
 //
 // The DX11 build (PinballArcade11.exe) advances the simulation by a fixed
-// 16 ms every rendered frame and has no frame cap, so the table runs 2x fast
-// at 120 Hz, 4x at 240 Hz and faster still with vsync off. The DX9 build has
-// a built-in 60 fps cap and is unaffected. We restore the 60 fps cadence the
+// 16 ms every rendered frame, so actual rendering above 60 fps speeds it up.
+// Legacy windowed DX11 was measured at 119.84 fps on a 120 Hz desktop and
+// appeared too fast. Native fullscreen appeared normal-speed in a separate
+// test, but its FPS was not measured. Refresh rate alone does not prove FPS.
+// The DX9 build has a built-in 60 fps cap. We restore the 60 fps cadence the
 // physics was tuned for.
 //
 // Pacing: a high-resolution timer inside the game's own per-frame timer

@@ -12,11 +12,13 @@ game back exactly as it was.
   The fix holds gameplay to the 60 fps its physics were made for. The speed problem was not
   reproduced in our native fullscreen test, where gameplay appeared normal-speed; fullscreen
   FPS was not measured. A monitor's refresh rate alone does not establish the game's speed.
-- **Screen resolution.** The game opened in a small window in the corner of the screen that
-  couldn't be moved, and its settings tool didn't list modern resolutions. It now runs
-  fullscreen on any monitor with the picture kept 16:9 and black bars at the sides (or top and
-  bottom), or in a proper centred window. It renders at full resolution, so nothing is
-  stretched, and stays sharp with Windows display scaling.
+- **Screen resolution.** In windowed mode the game opened as a small window in the corner of the
+  screen that couldn't be moved. In DX11 native fullscreen it stretched a 2560x1440 picture
+  across the whole 5120x1440 screen, distorting the image. (The old settings tool's DX11
+  resolution list also stops at 4096 pixels wide.) The fix runs the game fullscreen on any
+  monitor with the picture kept 16:9 and black bars at the sides (or top and bottom), or in a
+  proper centred window. It renders at full resolution, so nothing is stretched, and stays sharp
+  with Windows display scaling.
 - **Broken settings tool.** The Launch Configuration Utility crashes on a fresh install. It is
   replaced by a settings window built into the fix, which opens when the game starts.
 - **Small menu background (DX9).** The moving blueprint background in the menus was a small box

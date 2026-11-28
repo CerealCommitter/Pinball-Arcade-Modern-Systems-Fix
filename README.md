@@ -63,16 +63,14 @@ Opens when the game starts, before the game loads its settings, whichever versio
     anisotropic 4x to 16x), **Post-processing**, **Ball reflection**.
 - **Language** and **Focus-sensitive Input** (whether the game ignores input while it isn't the
   active window), for both renderers.
-
-All of these are written to the game's own settings files in the same format the old tool used.
-The old tool's resolution and window-mode settings are replaced by **Display**, and its Cabinet
-tab (screen layouts for multi-screen arcade cabinets) is left out because the cabinet version
-isn't supported.
 - **Show this window every time the game starts**: untick to start straight away with your
   saved settings. Hold **Shift** while the game starts to bring the window back.
 - **Play** starts the game; **Quit** cancels the launch.
 
-Resolution isn't a choice any more: the fix uses your monitor's current desktop resolution.
+All of these are written to the game's own settings files in the same format the old tool used.
+The old tool's resolution and window-mode settings are replaced by **Display** (the fix uses your
+monitor's current desktop resolution), and its Cabinet tab (screen layouts for multi-screen
+arcade cabinets) is left out because the cabinet version isn't supported.
 
 ![The main menu in 16:9 on a 32:9 monitor](screenshots/menu-fullscreen-32x9.jpg)
 

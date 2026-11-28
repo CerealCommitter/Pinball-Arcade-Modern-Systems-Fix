@@ -16,8 +16,7 @@ game back exactly as it was.
   screen that couldn't be moved. In DX11 native fullscreen it stretched a 2560x1440 picture
   across the whole 5120x1440 screen, distorting the image. (The old settings tool's DX11
   resolution list also stops at 4096 pixels wide.) The fix runs the game fullscreen on any
-  monitor with the picture kept 16:9 and black bars at the sides (or top and bottom), or in a
-  proper centred window. It renders at full resolution, so nothing is stretched, and stays sharp
+  monitor with the picture kept 16:9 and black bars at the sides (or top and bottom), or in a proper centered window. It renders at full resolution, so nothing is stretched, and stays sharp
   with Windows display scaling.
 - **Broken settings tool.** The Launch Configuration Utility crashes on a fresh install. It is
   replaced by a settings window built into the fix, which opens when the game starts.
@@ -25,15 +24,15 @@ game back exactly as it was.
   (reproduced on Teed Off), the on-screen letter-select box stayed up into the next game and took
   over the flipper keys until the table was reloaded. The fix closes it.
 
-Gameplay, physics, tables and graphics are otherwise unchanged.
+Gameplay, physics, tables, and graphics are otherwise unchanged.
 
 ## Install
-1. Copy `bin\xinput1_3.dll` into the game folder, next to `PinballArcade.exe`. For Steam that is
+1. Copy `bin\xinput1_3.dll` into the game folder, next to `PinballArcade.exe`. For Steam, that is
    `<Steam library>\steamapps\common\PinballArcade\`.
    Optionally copy `bin\PinballArcadeFix.ini` too; it documents every setting, but the settings
    window creates it for you.
 2. Start the game from Steam. Steam asks which version to run: pick the **DX11** option and tick
-   Steam's box to remember the choice. From then on the game goes straight to the fix's settings
+   Steam's box to remember the choice. From then on, the game goes straight to the fix's settings
    window, and you never see the old Launch Configuration Utility again. You can still switch to
    DX9 in the settings window.
 
@@ -42,7 +41,7 @@ present) from the game folder.
 
 **Supported version:** the final Steam build (game version 1.71, Steam build 5650517, October
 2020) of `PinballArcade11.exe` (DX11) and `PinballArcade.exe` (DX9). The fix checks the exe
-before changing anything; on any other build it does nothing and says so in its log. The cabinet
+before changing anything; on any other build, it does nothing and logs that. The cabinet
 version (`PinballArcadeCabinet.exe`) is not supported.
 
 ## Settings window
@@ -53,8 +52,7 @@ Opens when the game starts, before the game loads its settings, whichever versio
 - **Renderer**: DirectX 11 (recommended) or DirectX 9. If Steam started the other version, the
   fix restarts the game in the one chosen here.
 - **Display**: *Fullscreen 16:9 with black bars* or *Windowed 16:9* (a normal window at 75% of
-  the fullscreen size, 1920x1080 on a 2560x1440 or 5120x1440 screen, centred; it can be moved
-  and minimised but not resized).
+  the fullscreen size, 1920x1080 on a 2560x1440 or 5120x1440 screen, centered; it can be moved and minimized but not resized).
 - **Graphics settings for the selected renderer**, with the same choices the old settings tool
   had on its DX11 and DX9 tabs. The list changes when you switch Renderer:
   - DirectX 11: **Anti-aliasing (MSAA)** (off, 4x, 8x), **MSAA quality** (0-100),
@@ -98,11 +96,11 @@ All addresses below are in the supported build.
 - `PinballArcade11.exe` advances the simulation by a fixed 16 ms for every frame it draws
   (frame timer at `0x49D7B0`), so it runs fast whenever it renders above 60 fps: about
   120 fps means about twice the intended speed.
-- In its original **windowed** mode nothing caps that frame rate: the game presents with
+- In its original **windowed** mode, nothing caps that frame rate: the game presents with
   `Present(1)` (`0x73DB19`), once per monitor refresh, so on a 120 Hz desktop it renders at
-  about 120 fps. Its present function (`0x73DA80`) does contain a frame limiter, a minimum of
+  about 120 fps. Its present function (`0x73DA80`) includes a frame limiter: a minimum of
   15 ms between frames (about 66 fps), but it only runs while the renderer's fullscreen flag is
-  set (the flag the game's Alt+Enter toggle switches); in windowed mode that flag is off. If
+  set (the flag the game's Alt+Enter toggle switches); in windowed mode, that flag is off. If
   native fullscreen sets the same flag, that would explain why it looked normal-speed. This
   comes from reading the code and hasn't been confirmed by measuring fullscreen FPS. Desktop
   refresh rate alone doesn't prove the frame rate.
@@ -111,18 +109,16 @@ All addresses below are in the supported build.
   with Terminator 2 appearing too fast. Native fullscreen appeared normal-speed in a separate
   test; its FPS was not measured, so we do not claim a fullscreen speed reproduction or
   that every fullscreen configuration is immune.
-- The fix hooks the frame timer and holds each frame to 1/60 s with a high-resolution timer, and
-  takes over the `Present` call to limit DXGI's frame queue to one frame, which keeps input lag
-  low. Measured: a steady 16.67 ms per frame.
+- The fix hooks the frame timer, holds each frame to 1/60 s with a high-resolution timer, and takes over the `Present` call to limit DXGI's frame queue to one frame, keeping input lag low. Measured: a steady 16.67 ms per frame.
 
 ### Loading while capped (DX11)
 - The game streams its data one chunk per frame, and the title screen only accepts input once its
-  start-up loading is done. A plain 60 fps cap therefore makes loading slow: in an early version
-  of this fix, the title ignored input for 20-45 seconds and tables took about 25 seconds to
+  start-up loading is done. A plain 60 fps cap therefore slows loading: in an early version
+  of this fix, the title ignored input for 20-45 seconds, and tables took about 25 seconds to
   load. This was caused by the cap, not by the original game.
 - So the cap is lifted while the game loads. During start-up, it stays off until disk reads stop
-  and you press a key, button or controller button (20 second limit). For later loads, it is off
-  while at least 12 of the last 16 frames read from disk, and back on after 8 frames without
+  and you press a key, button, or controller button (20-second limit). For later loads, it is off
+  while at least 12 of the last 16 frames read data from disk, and back on after 8 frames without
   reads. Gameplay itself reads nothing from disk (measured), so a table in play is never sped up.
   With this, the title accepts input about a second after it appears and tables load in about
   3 seconds. Unpatched load times were not measured.
@@ -130,30 +126,30 @@ All addresses below are in the supported build.
 ### Screen resolution (both builds)
 - DX11 creates a normal window from its saved position and size (by default at 0,0 with the
   title bar off-screen) and sizes its swap chain to the window. DX9 opens 640x480 by default,
-  picks its render size from a preset table and moves its own window.
+  picks its render size from a preset table, and moves its own window.
 - The fix hooks the game's `CreateWindowExA` and makes the game window either borderless at the
   largest 16:9 size that fits the monitor, with a black full-screen window behind it for the
-  bars, or a normal centred window. The game renders at the window's size. For DX9 it also hooks
+  bars, or a normal centered window. The game renders at the window's size. For DX9, it also hooks
   the set-display-mode function (`0x5BA5A0`) to use that size, keeps the game out of exclusive
   fullscreen, pins `MoveWindow`, and updates the screen size the menus are laid out for.
-- The process is marked per-monitor DPI aware, so Windows display scaling can't blur it.
+- The process is marked per-monitor DPI-aware, so Windows display scaling can't blur it.
 - In our unpatched DX11 native fullscreen test, a 2560x1440 picture was stretched across the
   5120x1440 display. This display problem is separate from the speed problem reproduced in
   legacy windowed mode. The fix ignores the old tool's DX11 "Fullscreen" setting and blocks
   Alt+Enter, using its own borderless window instead. At the default 16:9 setting on this
-  display, the patched game renders a centred 2560x1440 picture with black side bars;
+  display, the patched game renders a centered 2560x1440 picture with black side bars;
   it does not render a 5120x1440 ultrawide game view.
 
 ### Settings tool
 `PBAConfig.exe` (the Launch Configuration Utility) shows number fields for arcade-cabinet screen
-layouts that are blank on a fresh install, and crashes reading them when you press Done. Its
+layouts that are blank on a fresh install, and crashes when reading them when you press Done. Its
 DX11 resolution list also stops at 4096 wide. The fix's settings window replaces it: it runs at the
 game's entry point, before the game reads its settings, and writes `settings.dat` and
 `dx11_settings.dat` in the same formats `PBAConfig.exe` used (cabinet settings are left alone).
 
 ### Stuck high-score box
 The game opens its letter-select box (GUI menu `0x23`) while a table's display shows that the
-table wants initials. Only some table types contain the code that closes it again afterwards. If
+table wants initials. Only some table types contain the code that closes it again afterward. If
 the box is still open half a second after the game has finished with initials, the fix closes it
 with the game's own "back to previous menu" function. Players reported this bug years ago, on
 tables such as Cactus Jack's and Black Knight 2000.
@@ -185,7 +181,7 @@ Tested on Windows 11 with a 5120x1440 120 Hz monitor:
   settings.
 - Steam still lists the old Launch Configuration Utility. Removing it would mean changing the
   game's files; ticking Steam's "remember my choice" hides it.
-- The fix uses the primary monitor, and reads the desktop resolution when the game starts.
+- The fix uses the primary monitor and reads the desktop resolution when the game starts.
 - Online features that depended on FarSight's servers are not covered.
 
 ## Build
@@ -204,7 +200,7 @@ Output: `bin\xinput1_3.dll`.
 - `LICENSE` - MIT license.
 
 ## License
-The code is released under the [MIT License](LICENSE): you can use, modify and share it, as long as
+The code is released under the [MIT License](LICENSE): you can use, modify, and share it, as long as
 the copyright notice stays with it. It comes with no warranty.
 
 Not covered by the license:

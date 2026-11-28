@@ -1,4 +1,35 @@
 // Embedded resources for the fix DLL.
+#include <winver.h>
 #include "LauncherUI.h"
+#include "Version.h"
 
 IDR_LAUNCHER_LOGO RCDATA "..\\assets\\logo.png"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    PAFIX_VERSION_MAJOR, PAFIX_VERSION_MINOR, PAFIX_VERSION_PATCH, 0
+ PRODUCTVERSION PAFIX_VERSION_MAJOR, PAFIX_VERSION_MINOR, PAFIX_VERSION_PATCH, 0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_DLL
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "CerealCommitter"
+            VALUE "FileDescription",  "Pinball Arcade - Modern Systems Fix"
+            VALUE "FileVersion",      PAFIX_VERSION_STR
+            VALUE "InternalName",     "xinput1_3.dll"
+            VALUE "LegalCopyright",   "Copyright (c) 2026 CerealCommitter. MIT License."
+            VALUE "OriginalFilename", "xinput1_3.dll"
+            VALUE "ProductName",      "Pinball Arcade - Modern Systems Fix"
+            VALUE "ProductVersion",   PAFIX_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

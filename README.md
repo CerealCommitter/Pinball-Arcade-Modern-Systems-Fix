@@ -83,8 +83,9 @@ extras (`AspectRatio`, `FrameRateCap`). The game's own settings stay where the g
 in `Documents\..\My Games\Pinball Arcade\` (`settings.dat`, `dx11_settings.dat`).
 
 ## Troubleshooting
-The fix writes `PinballArcadeFix.log` in the game folder each time the game starts: what it
-hooked, the window size it chose, and a frame-timing line every 10 seconds. If something doesn't
+The fix writes `PinballArcadeFix.log` in the game folder each time the game starts: its version
+(first line; also in `xinput1_3.dll`'s file properties), what it hooked, the window size it
+chose, and a frame-timing line every 10 seconds. If something doesn't
 work, that log shows what happened.
 
 - **Steam's "Launch Configuration Utility" crashes.** That's the game's original tool (see below);

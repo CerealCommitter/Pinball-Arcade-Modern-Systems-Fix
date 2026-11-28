@@ -18,6 +18,7 @@
 // windowed swap chain it measured less even than the timer, so it is not the
 // default.)
 #include "Common.h"
+#include "Version.h"
 #include <stdio.h>
 #include <dxgi.h>
 
@@ -500,7 +501,7 @@ static void Init()
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
     const wchar_t* exeName = wcsrchr(exePath, L'\\') ? wcsrchr(exePath, L'\\') + 1 : exePath;
-    Log("Pinball Arcade Fix loaded into %ls", exeName);
+    Log("Pinball Arcade Fix " PAFIX_VERSION_STR " loaded into %ls", exeName);
 
     HMODULE exe = GetModuleHandleW(nullptr);
     auto nt = (IMAGE_NT_HEADERS*)((BYTE*)exe + ((IMAGE_DOS_HEADER*)exe)->e_lfanew);

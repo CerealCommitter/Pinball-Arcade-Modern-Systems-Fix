@@ -17,11 +17,6 @@ game back exactly as it was.
   fullscreen on any monitor with the picture kept 16:9 and black bars at the sides (or top and
   bottom), or in a proper centred window. It renders at full resolution, so nothing is
   stretched, and stays sharp with Windows display scaling.
-- **Frozen "Press Start" screen and slow loading (DX11).** The title screen ignored the keyboard
-  and mouse for 20-45 seconds after it appeared, and tables took about 25 seconds to load. Now
-  the title responds after about a second and tables load in about 3 seconds.
-- **Start-up focus.** The game could sit frozen on the title screen until you alt-tabbed away
-  and back.
 - **Broken settings tool.** The Launch Configuration Utility crashes on a fresh install. It is
   replaced by a settings window built into the fix, which opens when the game starts.
 - **Small menu background (DX9).** The moving blueprint background in the menus was a small box
@@ -107,14 +102,17 @@ All addresses below are in the supported build.
   takes over the `Present` call to limit DXGI's frame queue to one frame, which keeps input lag
   low. Measured: a steady 16.67 ms per frame.
 
-### Loading (DX11)
+### Loading while capped (DX11)
 - The game streams its data one chunk per frame, and the title screen only accepts input once its
-  start-up loading is done. At 60 fps that made the title seem frozen for 20-45 seconds and table
-  loads take about 25 seconds.
-- During start-up, the cap is lifted until disk reads stop and you press a key, button or
-  controller button (20 second limit). For later loads, it is lifted while at least 12 of the
-  last 16 frames read from disk, and restored after 8 frames without reads. Gameplay itself reads
-  nothing from disk (measured), so a table in play is never sped up.
+  start-up loading is done. A plain 60 fps cap therefore makes loading slow: in an early version
+  of this fix, the title ignored input for 20-45 seconds and tables took about 25 seconds to
+  load. This was caused by the cap, not by the original game.
+- So the cap is lifted while the game loads. During start-up, it stays off until disk reads stop
+  and you press a key, button or controller button (20 second limit). For later loads, it is off
+  while at least 12 of the last 16 frames read from disk, and back on after 8 frames without
+  reads. Gameplay itself reads nothing from disk (measured), so a table in play is never sped up.
+  With this, the title accepts input about a second after it appears and tables load in about
+  3 seconds. Unpatched load times were not measured.
 
 ### Screen resolution (both builds)
 - DX11 creates a normal window from its saved position and size (by default at 0,0 with the
@@ -137,8 +135,9 @@ All addresses below are in the supported build.
 
 ### Start-up focus
 The DX11 game only runs its title screen once Windows tells it its window is active. When Steam
-starts the game, Windows can refuse to bring the new window to the front. The fix makes sure the
-game window takes focus when it first appears.
+starts the game, Windows can refuse to bring a new window to the front, and the fix's own black
+backdrop window could take focus first. As a safeguard, the fix makes sure the game window takes
+focus when it first appears.
 
 ### Settings tool
 `PBAConfig.exe` (the Launch Configuration Utility) shows number fields for arcade-cabinet screen
